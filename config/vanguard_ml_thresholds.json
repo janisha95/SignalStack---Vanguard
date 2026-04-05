@@ -1,0 +1,7 @@
+{
+  "equity": {"long": 0.5, "short": 0.5},
+  "forex": {"long": 0.5, "short": 0.5},
+  "commodity": {"long": 0.5, "short": 0.5},
+  "crypto": {"long": 0.5, "short": 0.5},
+  "index": {"long": 0.5, "short": 0.5}
+}

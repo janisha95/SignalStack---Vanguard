@@ -1,0 +1,163 @@
+{
+  "_comment": "Vanguard Universe Config — all tradeable instrument universes",
+  "_version": "1.0",
+
+  "universes": {
+
+    "ttp_equity": {
+      "description": "TTP US equity universe — dynamic, fetched from Alpaca each cycle",
+      "asset_class": "equity",
+      "source": "alpaca",
+      "dynamic": true,
+      "account_types": ["ttp"],
+      "filter_rules": {
+        "min_price": 2.0,
+        "min_avg_volume": 500000,
+        "lookback_days": 10,
+        "excluded_exchanges": ["OTC"],
+        "excluded_suffixes": [".WS", ".WT", ".U", ".R", ".A", ".B", ".W"],
+        "exclude_leveraged_etfs": true
+      },
+      "health_thresholds": {
+        "max_stale_minutes": 10.0,
+        "min_rel_vol": 0.3,
+        "max_spread_pct": 0.05,
+        "min_bars_warmup": 50,
+        "session_avg_window": 20
+      }
+    },
+
+    "ftmo_cfd": {
+      "description": "FTMO MT5 CFD universe — 165 instruments across 7 asset classes",
+      "source": "mt5",
+      "dynamic": false,
+      "account_types": ["ftmo"],
+      "health_thresholds": {
+        "max_stale_minutes": 30.0,
+        "min_rel_vol": 0.1,
+        "max_spread_pct": 0.50,
+        "min_bars_warmup": 50,
+        "session_avg_window": 20
+      },
+      "instruments": {
+        "forex": [
+          "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD",
+          "EURGBP", "EURJPY", "GBPJPY", "EURCAD", "EURAUD", "EURNZD",
+          "GBPAUD", "GBPCAD", "GBPNZD", "GBPCHF", "EURCHF",
+          "AUDJPY", "CADJPY", "CHFJPY", "AUDCAD", "AUDNZD", "AUDCHF",
+          "NZDJPY", "NZDCAD", "NZDCHF", "CADCHF",
+          "EURHUF", "EURPLN", "EURSEK", "EURNOK", "EURCZK",
+          "USDMXN", "USDZAR", "USDHKD", "USDSGD", "USDTRY",
+          "USDHUF", "USDPLN", "USDSEK", "USDNOK", "USDDKK",
+          "SGDJPY", "GBPSGD", "GBPHKD", "NZDSGD", "EURHKD"
+        ],
+        "index": [
+          "US500.cash", "US100.cash", "US30.cash", "US2000.cash",
+          "DE40.cash", "UK100.cash", "JP225.cash", "FR40.cash",
+          "ES35.cash", "IT40.cash", "NL25.cash", "HK50.cash",
+          "AU200.cash", "CN50.cash", "STOXX50E.cash", "NO25.cash",
+          "SG30.cash"
+        ],
+        "metal": [
+          "XAUUSD", "XAGUSD", "XCUUSD", "XPDUSD", "XPTUSD"
+        ],
+        "energy": [
+          "USOIL.cash", "UKOIL.cash", "NATGAS.cash"
+        ],
+        "agriculture": [
+          "CORN.c", "SOYBEAN.c", "WHEAT.c", "SUGAR.c", "COCOA.c", "COFFEE.c"
+        ],
+        "equity_cfd": [
+          "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA",
+          "BRKB", "JPM", "JNJ", "UNH", "V", "MA", "PG", "HD",
+          "BAC", "ABBV", "MRK", "KO", "PEP", "COST", "AVGO",
+          "WMT", "MCD", "CVX", "LLY", "TMO", "DIS", "DHR",
+          "CSCO", "ABT", "CRM", "ADBE", "NKE", "BMY", "NEE",
+          "PM", "T", "ORCL", "TXN", "QCOM", "WFC", "IBM",
+          "GE", "BA", "CAT", "DE", "MMM", "AXP", "GS",
+          "RTX", "SPGI", "NFLX", "PYPL", "UBER", "SBUX",
+          "AMD", "INTC", "SAP", "ASML", "NVO",
+          "BIDU", "NTES", "NOW", "SNOW", "DDOG", "PLTR",
+          "COIN", "RBLX", "TSM", "SONY", "TM",
+          "SHOP", "SQ", "SPOT", "LYFT", "DASH",
+          "ZM", "DOCU", "TWLO", "NET", "DKNG",
+          "ETSY", "W", "PINS", "SNAP", "ROKU"
+        ],
+        "crypto": [
+          "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "BCHUSD",
+          "SOLUSD", "BNBUSD", "ADAUSD", "DOTUSD", "AVAXUSD"
+        ]
+      }
+    },
+
+    "topstep_futures": {
+      "description": "TopStep CME/CBOT/COMEX/NYMEX futures — 42 contracts",
+      "source": "ibkr",
+      "dynamic": false,
+      "account_types": ["topstep", "apex", "tradeday"],
+      "health_thresholds": {
+        "max_stale_minutes": 15.0,
+        "min_rel_vol": 0.2,
+        "max_spread_pct": 0.30,
+        "min_bars_warmup": 50,
+        "session_avg_window": 20
+      },
+      "instruments": {
+        "index": [
+          {"symbol": "ES",  "name": "E-mini S&P 500",        "exchange": "CME",   "tick_size": 0.25,      "tick_value": 12.50,  "margin": 500},
+          {"symbol": "MES", "name": "Micro E-mini S&P 500",  "exchange": "CME",   "tick_size": 0.25,      "tick_value": 1.25,   "margin": 50},
+          {"symbol": "NQ",  "name": "E-mini Nasdaq 100",     "exchange": "CME",   "tick_size": 0.25,      "tick_value": 5.00,   "margin": 1600},
+          {"symbol": "MNQ", "name": "Micro E-mini Nasdaq",   "exchange": "CME",   "tick_size": 0.25,      "tick_value": 0.50,   "margin": 160},
+          {"symbol": "YM",  "name": "E-mini Dow",            "exchange": "CBOT",  "tick_size": 1.0,       "tick_value": 5.00,   "margin": 500},
+          {"symbol": "MYM", "name": "Micro E-mini Dow",      "exchange": "CBOT",  "tick_size": 1.0,       "tick_value": 0.50,   "margin": 50},
+          {"symbol": "RTY", "name": "E-mini Russell 2000",   "exchange": "CME",   "tick_size": 0.10,      "tick_value": 5.00,   "margin": 500},
+          {"symbol": "M2K", "name": "Micro E-mini Russell",  "exchange": "CME",   "tick_size": 0.10,      "tick_value": 0.50,   "margin": 50}
+        ],
+        "energy": [
+          {"symbol": "CL",  "name": "Crude Oil WTI",         "exchange": "NYMEX", "tick_size": 0.01,      "tick_value": 10.00,  "margin": 1000},
+          {"symbol": "MCL", "name": "Micro Crude Oil",       "exchange": "NYMEX", "tick_size": 0.01,      "tick_value": 1.00,   "margin": 100},
+          {"symbol": "NG",  "name": "Natural Gas",           "exchange": "NYMEX", "tick_size": 0.001,     "tick_value": 10.00,  "margin": 1000},
+          {"symbol": "BZ",  "name": "Brent Crude Oil",       "exchange": "NYMEX", "tick_size": 0.01,      "tick_value": 10.00,  "margin": 1000}
+        ],
+        "metal": [
+          {"symbol": "GC",  "name": "Gold",                  "exchange": "COMEX", "tick_size": 0.10,      "tick_value": 10.00,  "margin": 5000},
+          {"symbol": "MGC", "name": "Micro Gold",            "exchange": "COMEX", "tick_size": 0.10,      "tick_value": 1.00,   "margin": 500},
+          {"symbol": "SI",  "name": "Silver",                "exchange": "COMEX", "tick_size": 0.005,     "tick_value": 25.00,  "margin": 5000},
+          {"symbol": "SIL", "name": "Micro Silver",          "exchange": "COMEX", "tick_size": 0.005,     "tick_value": 2.50,   "margin": 500},
+          {"symbol": "HG",  "name": "Copper",                "exchange": "COMEX", "tick_size": 0.0005,    "tick_value": 12.50,  "margin": 3000},
+          {"symbol": "PL",  "name": "Platinum",              "exchange": "NYMEX", "tick_size": 0.10,      "tick_value": 5.00,   "margin": 2000},
+          {"symbol": "PA",  "name": "Palladium",             "exchange": "NYMEX", "tick_size": 0.05,      "tick_value": 5.00,   "margin": 3000}
+        ],
+        "agriculture": [
+          {"symbol": "ZC",  "name": "Corn",                  "exchange": "CBOT",  "tick_size": 0.25,      "tick_value": 12.50,  "margin": 1000},
+          {"symbol": "ZS",  "name": "Soybeans",              "exchange": "CBOT",  "tick_size": 0.25,      "tick_value": 12.50,  "margin": 2000},
+          {"symbol": "ZW",  "name": "Wheat",                 "exchange": "CBOT",  "tick_size": 0.25,      "tick_value": 12.50,  "margin": 1500},
+          {"symbol": "ZL",  "name": "Soybean Oil",           "exchange": "CBOT",  "tick_size": 0.0001,    "tick_value": 6.00,   "margin": 1000},
+          {"symbol": "ZM",  "name": "Soybean Meal",          "exchange": "CBOT",  "tick_size": 0.10,      "tick_value": 10.00,  "margin": 1500},
+          {"symbol": "KE",  "name": "KC HRW Wheat",          "exchange": "CBOT",  "tick_size": 0.25,      "tick_value": 12.50,  "margin": 1500},
+          {"symbol": "ZO",  "name": "Oats",                  "exchange": "CBOT",  "tick_size": 0.25,      "tick_value": 12.50,  "margin": 1000},
+          {"symbol": "LE",  "name": "Live Cattle",           "exchange": "CME",   "tick_size": 0.025,     "tick_value": 10.00,  "margin": 2000},
+          {"symbol": "HE",  "name": "Lean Hogs",             "exchange": "CME",   "tick_size": 0.025,     "tick_value": 10.00,  "margin": 1500},
+          {"symbol": "GF",  "name": "Feeder Cattle",         "exchange": "CME",   "tick_size": 0.025,     "tick_value": 12.50,  "margin": 2000},
+          {"symbol": "KC",  "name": "Coffee",                "exchange": "ICE",   "tick_size": 0.05,      "tick_value": 18.75,  "margin": 2000}
+        ],
+        "interest_rate": [
+          {"symbol": "ZB",  "name": "30-Year US T-Bond",     "exchange": "CBOT",  "tick_size": 0.03125,   "tick_value": 31.25,  "margin": 2000},
+          {"symbol": "ZN",  "name": "10-Year US T-Note",     "exchange": "CBOT",  "tick_size": 0.015625,  "tick_value": 15.625, "margin": 1500},
+          {"symbol": "ZF",  "name": "5-Year US T-Note",      "exchange": "CBOT",  "tick_size": 0.0078125, "tick_value": 7.8125, "margin": 1000},
+          {"symbol": "ZT",  "name": "2-Year US T-Note",      "exchange": "CBOT",  "tick_size": 0.00390625,"tick_value": 7.8125, "margin": 500},
+          {"symbol": "UB",  "name": "Ultra T-Bond",          "exchange": "CBOT",  "tick_size": 0.03125,   "tick_value": 31.25,  "margin": 2500}
+        ],
+        "forex": [
+          {"symbol": "6E",  "name": "Euro FX",               "exchange": "CME",   "tick_size": 0.00005,   "tick_value": 6.25,   "margin": 2000},
+          {"symbol": "6B",  "name": "British Pound",         "exchange": "CME",   "tick_size": 0.0001,    "tick_value": 6.25,   "margin": 2000},
+          {"symbol": "6J",  "name": "Japanese Yen",          "exchange": "CME",   "tick_size": 0.0000005, "tick_value": 6.25,   "margin": 2000},
+          {"symbol": "6C",  "name": "Canadian Dollar",       "exchange": "CME",   "tick_size": 0.00005,   "tick_value": 5.00,   "margin": 1500},
+          {"symbol": "6A",  "name": "Australian Dollar",     "exchange": "CME",   "tick_size": 0.0001,    "tick_value": 10.00,  "margin": 1500},
+          {"symbol": "6N",  "name": "New Zealand Dollar",    "exchange": "CME",   "tick_size": 0.0001,    "tick_value": 10.00,  "margin": 1500},
+          {"symbol": "6S",  "name": "Swiss Franc",           "exchange": "CME",   "tick_size": 0.0001,    "tick_value": 12.50,  "margin": 2000}
+        ]
+      }
+    }
+  }
+}

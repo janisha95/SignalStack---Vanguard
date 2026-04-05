@@ -1,0 +1,21 @@
+{
+    "signalstack": {
+        "webhook_url": "ENV:SIGNALSTACK_WEBHOOK_URL",
+        "timeout_seconds": 5,
+        "max_retries": 2,
+        "retry_delay_seconds": 1.0,
+        "order_type": "market",
+        "log_payloads": true
+    },
+    "telegram": {
+        "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+        "chat_id": "ENV:TELEGRAM_CHAT_ID",
+        "enabled": true
+    },
+    "defaults": {
+        "execution_mode": "paper",
+        "shares_per_trade": 100,
+        "max_trades_per_run": 25,
+        "max_per_side": 15
+    }
+}

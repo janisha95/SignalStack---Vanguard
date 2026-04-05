@@ -1,0 +1,58 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# databases / runtime state
+*.db
+*.sqlite
+*.sqlite3
+*.wal
+*.shm
+*.lock
+
+# data / caches / outputs
+data/
+data_cache/
+logs/
+output/
+outputs/
+artifacts/
+runs/
+cache/
+*.parquet
+*.csv
+*.jsonl
+*.bin
+
+# models / artifacts
+models/
+checkpoints/
+*.pkl
+*.pt
+*.pth
+*.joblib
+
+# python junk
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# deploy / frontend junk
+.vercel/
+node_modules/
+.next/
+dist/
+build/
+
+# archives / exports / notebooks
+*.zip
+*.docx
+*.ipynb
+
+# temp
+tmp_*

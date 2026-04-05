@@ -1,0 +1,38 @@
+{
+    "equity": {
+        "strategies": ["smc", "momentum", "mean_reversion", "risk_reward", "relative_strength", "breakdown"],
+        "top_n_per_strategy": 5,
+        "short_only_strategies": ["breakdown"],
+        "ml_gate_threshold": 0.50
+    },
+    "forex": {
+        "strategies": ["smc", "session_timing", "htf_alignment", "liquidity_grab_reversal", "risk_reward"],
+        "top_n_per_strategy": {"smc": 5, "session_timing": 3, "htf_alignment": 3, "liquidity_grab_reversal": 3, "risk_reward": 5},
+        "short_only_strategies": [],
+        "ml_gate_threshold": 0.50
+    },
+    "index": {
+        "strategies": ["momentum", "session_open", "risk_reward"],
+        "top_n_per_strategy": 3,
+        "short_only_strategies": [],
+        "ml_gate_threshold": 0.50
+    },
+    "metal": {
+        "strategies": ["smc", "cross_asset", "risk_reward"],
+        "top_n_per_strategy": 3,
+        "short_only_strategies": [],
+        "ml_gate_threshold": 0.50
+    },
+    "crypto": {
+        "strategies": ["smc", "momentum_breakout", "risk_reward"],
+        "top_n_per_strategy": 3,
+        "short_only_strategies": [],
+        "ml_gate_threshold": 0.50
+    },
+    "commodity": {
+        "strategies": ["momentum", "risk_reward"],
+        "top_n_per_strategy": 3,
+        "short_only_strategies": [],
+        "ml_gate_threshold": 0.50
+    }
+}

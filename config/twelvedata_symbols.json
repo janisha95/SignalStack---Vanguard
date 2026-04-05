@@ -1,0 +1,113 @@
+{
+  "_comment": "Twelve Data symbol universe for V1 dual-adapter polling.",
+  "_format": "Symbols use Twelve Data notation: forex=BASE/QUOTE, metals=XAU/USD etc., indices=short codes.",
+  "_total": "~106 symbols across 6 asset classes",
+
+  "forex": [
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "USD/CHF",
+    "AUD/USD",
+    "USD/CAD",
+    "NZD/USD",
+    "EUR/GBP",
+    "EUR/JPY",
+    "GBP/JPY",
+    "EUR/AUD",
+    "EUR/CHF",
+    "EUR/CAD",
+    "EUR/NZD",
+    "GBP/AUD",
+    "GBP/CAD",
+    "GBP/CHF",
+    "GBP/NZD",
+    "AUD/JPY",
+    "AUD/CAD",
+    "AUD/CHF",
+    "AUD/NZD",
+    "CAD/JPY",
+    "CHF/JPY",
+    "NZD/JPY",
+    "NZD/CAD",
+    "NZD/CHF",
+    "USD/MXN",
+    "USD/SEK",
+    "USD/NOK",
+    "USD/DKK",
+    "USD/SGD",
+    "USD/HKD",
+    "USD/ZAR",
+    "USD/TRY"
+  ],
+
+  "index": [
+    "SPX",
+    "NDX",
+    "DJI",
+    "RUT",
+    "VIX",
+    "GDAXI",
+    "FTSE",
+    "FCHI",
+    "N225",
+    "HSI",
+    "IBEX35",
+    "AEX",
+    "SSMI",
+    "ASX200",
+    "KOSPI"
+  ],
+
+  "metal": [
+    "XAU/USD",
+    "XAG/USD",
+    "XPT/USD",
+    "XPD/USD",
+    "XCU/USD"
+  ],
+
+  "energy": [
+    "WTI",
+    "BRENT",
+    "NATGAS",
+    "RBOB GASOLINE",
+    "HEATING OIL"
+  ],
+
+  "crypto": [
+    "BTC/USD",
+    "ETH/USD",
+    "LTC/USD",
+    "XRP/USD",
+    "SOL/USD",
+    "ADA/USD",
+    "DOT/USD",
+    "LINK/USD",
+    "AVAX/USD",
+    "MATIC/USD",
+    "DOGE/USD",
+    "ATOM/USD",
+    "UNI/USD",
+    "AAVE/USD",
+    "BNB/USD"
+  ],
+
+  "agriculture": [
+    "WHEAT",
+    "CORN",
+    "SOYBEAN",
+    "COFFEE",
+    "SUGAR",
+    "COTTON",
+    "COCOA",
+    "ORANGE JUICE",
+    "LUMBER",
+    "ROUGH RICE",
+    "SOYBEAN OIL",
+    "SOYBEAN MEAL",
+    "LEAN HOGS",
+    "LIVE CATTLE",
+    "FEEDER CATTLE"
+  ]
+}

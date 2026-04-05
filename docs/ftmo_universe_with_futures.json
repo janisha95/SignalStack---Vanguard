@@ -1,0 +1,126 @@
+{
+  "futures_instruments": {
+    "note": "These are CME Group futures contracts available on Topstep, Apex, TradeDay, Elite Trader Funding, and other futures prop firms",
+    "equity_index_futures": {
+      "count": 8,
+      "session": "Sun 18:00 ET → Fri 17:00 ET with daily break 17:00-18:00",
+      "symbols": [
+        {"symbol": "ES", "name": "E-mini S&P 500", "exchange": "CME", "tick_value": "$12.50/tick", "point_value": "$50/point"},
+        {"symbol": "MES", "name": "Micro E-mini S&P 500", "exchange": "CME", "tick_value": "$1.25/tick", "point_value": "$5/point"},
+        {"symbol": "NQ", "name": "E-mini Nasdaq 100", "exchange": "CME", "tick_value": "$5.00/tick", "point_value": "$20/point"},
+        {"symbol": "MNQ", "name": "Micro E-mini Nasdaq 100", "exchange": "CME", "tick_value": "$0.50/tick", "point_value": "$2/point"},
+        {"symbol": "YM", "name": "E-mini Dow", "exchange": "CBOT", "tick_value": "$5.00/tick", "point_value": "$5/point"},
+        {"symbol": "MYM", "name": "Micro E-mini Dow", "exchange": "CBOT", "tick_value": "$0.50/tick", "point_value": "$0.50/point"},
+        {"symbol": "RTY", "name": "E-mini Russell 2000", "exchange": "CME", "tick_value": "$5.00/tick", "point_value": "$50/point"},
+        {"symbol": "M2K", "name": "Micro E-mini Russell 2000", "exchange": "CME", "tick_value": "$0.50/tick", "point_value": "$5/point"}
+      ]
+    },
+    "energy_futures": {
+      "count": 3,
+      "session": "Sun 18:00 ET → Fri 17:00 ET with daily break",
+      "symbols": [
+        {"symbol": "CL", "name": "Crude Oil WTI", "exchange": "NYMEX", "tick_value": "$10.00/tick", "point_value": "$1000/point"},
+        {"symbol": "MCL", "name": "Micro Crude Oil", "exchange": "NYMEX", "tick_value": "$1.00/tick", "point_value": "$100/point"},
+        {"symbol": "NG", "name": "Natural Gas", "exchange": "NYMEX", "tick_value": "$10.00/tick", "point_value": "$10000/point"}
+      ]
+    },
+    "metals_futures": {
+      "count": 5,
+      "session": "Sun 18:00 ET → Fri 17:00 ET with daily break",
+      "symbols": [
+        {"symbol": "GC", "name": "Gold", "exchange": "COMEX", "tick_value": "$10.00/tick", "point_value": "$100/point"},
+        {"symbol": "MGC", "name": "Micro Gold", "exchange": "COMEX", "tick_value": "$1.00/tick", "point_value": "$10/point"},
+        {"symbol": "SI", "name": "Silver", "exchange": "COMEX", "tick_value": "$25.00/tick", "point_value": "$5000/point"},
+        {"symbol": "SIL", "name": "Micro Silver", "exchange": "COMEX", "tick_value": "$2.50/tick", "point_value": "$500/point"},
+        {"symbol": "HG", "name": "Copper", "exchange": "COMEX", "tick_value": "$12.50/tick", "point_value": "$25000/point"}
+      ]
+    },
+    "grain_futures": {
+      "count": 3,
+      "session": "Limited hours, CBOT pit + electronic",
+      "symbols": [
+        {"symbol": "ZC", "name": "Corn", "exchange": "CBOT", "tick_value": "$12.50/tick", "point_value": "$50/point"},
+        {"symbol": "ZS", "name": "Soybeans", "exchange": "CBOT", "tick_value": "$12.50/tick", "point_value": "$50/point"},
+        {"symbol": "ZW", "name": "Wheat", "exchange": "CBOT", "tick_value": "$12.50/tick", "point_value": "$50/point"}
+      ]
+    },
+    "treasury_futures": {
+      "count": 3,
+      "session": "Sun 18:00 ET → Fri 17:00 ET",
+      "symbols": [
+        {"symbol": "ZB", "name": "30-Year US Treasury Bond", "exchange": "CBOT", "tick_value": "$31.25/tick"},
+        {"symbol": "ZN", "name": "10-Year US Treasury Note", "exchange": "CBOT", "tick_value": "$15.625/tick"},
+        {"symbol": "ZF", "name": "5-Year US Treasury Note", "exchange": "CBOT", "tick_value": "$7.8125/tick"}
+      ]
+    }
+  },
+  "cfd_to_futures_mapping": {
+    "note": "Maps FTMO CFD symbols to CME futures equivalents for cross-platform execution via Trade Dispensary or similar bridge",
+    "mappings": [
+      {"cfd": "US500.cash", "futures": "ES / MES", "exchange": "CME"},
+      {"cfd": "US100.cash", "futures": "NQ / MNQ", "exchange": "CME"},
+      {"cfd": "US30.cash", "futures": "YM / MYM", "exchange": "CBOT"},
+      {"cfd": "US2000.cash", "futures": "RTY / M2K", "exchange": "CME"},
+      {"cfd": "XAUUSD", "futures": "GC / MGC", "exchange": "COMEX"},
+      {"cfd": "XAGUSD", "futures": "SI / SIL", "exchange": "COMEX"},
+      {"cfd": "XCUUSD", "futures": "HG", "exchange": "COMEX"},
+      {"cfd": "USOIL.cash", "futures": "CL / MCL", "exchange": "NYMEX"},
+      {"cfd": "UKOIL.cash", "futures": "BZ (Brent)", "exchange": "NYMEX"},
+      {"cfd": "NATGAS.cash", "futures": "NG", "exchange": "NYMEX"},
+      {"cfd": "CORN.c", "futures": "ZC", "exchange": "CBOT"},
+      {"cfd": "SOYBEAN.c", "futures": "ZS", "exchange": "CBOT"},
+      {"cfd": "WHEAT.c", "futures": "ZW", "exchange": "CBOT"}
+    ]
+  },
+  "prop_firm_matrix": {
+    "note": "Which prop firms support which instrument types and platforms",
+    "cfds_forex": {
+      "firms": ["FTMO", "FundedNext", "The5ers", "Blue Guardian", "BrightFunded"],
+      "platforms": ["MT4", "MT5", "cTrader", "DXtrade"],
+      "instruments": "Forex, Indices CFD, Metals CFD, Commodities CFD, Equity CFDs, Crypto CFDs"
+    },
+    "futures": {
+      "firms": ["Topstep", "Apex Trader Funding", "TradeDay", "Elite Trader Funding", "MyFundedFutures", "FundedNext Futures", "AquaFutures", "TakeProfitTrader", "Tradeify", "BluSky"],
+      "platforms": ["NinjaTrader", "Tradovate", "TradingView"],
+      "instruments": "ES, NQ, YM, RTY, CL, NG, GC, SI, ZC, ZS, ZW, ZB, ZN, ZF + micro versions"
+    },
+    "equities_swing": {
+      "firms": ["Trade The Pool (TTP)"],
+      "platforms": ["Trader Evolution"],
+      "instruments": "12,000+ US equities and ETFs"
+    }
+  },
+  "execution_bridge_options": {
+    "mt5_direct": {
+      "cost": "Free",
+      "use_for": "FTMO and all MT5-based CFD prop firms",
+      "how": "Python mt5.order_send() — direct execution from your system",
+      "latency": "<1ms (same machine)"
+    },
+    "trade_dispensary": {
+      "cost": "One-time purchase",
+      "use_for": "Cross-platform: MT5 CFD signals → futures prop firm execution",
+      "how": "Self-hosted, runs on your machine, Price Translate for CFD→futures conversion",
+      "latency": "Local execution"
+    },
+    "duplikium": {
+      "cost": "~$60/mo for first account, decreasing per additional",
+      "use_for": "Multi-firm execution across MT4/MT5/cTrader/DXtrade/Tradovate/NinjaTrader",
+      "how": "Cloud-based, cross-platform",
+      "latency": "~20-40ms"
+    },
+    "copilink": {
+      "cost": "Subscription, 7-day free trial",
+      "use_for": "Futures-only multi-account on NinjaTrader/Tradovate",
+      "how": "NinjaTrader add-on, local execution",
+      "latency": "~1.6ms"
+    }
+  },
+  "updated_grand_total": {
+    "ftmo_cfd_instruments": 165,
+    "futures_instruments": 22,
+    "unique_underlyings_across_both": "~170 (most futures overlap with CFDs)",
+    "treasury_futures_unique": 3,
+    "total_tradeable_symbols": "187 across all prop firm types"
+  }
+}

@@ -1,0 +1,14 @@
+{
+    "accounts": [
+        {
+            "account_id": "ttp_demo_1m",
+            "enabled": true,
+            "prop_firm": "ttp",
+            "account_type": "demo",
+            "account_balance": 1000000,
+            "currency": "USD",
+            "execution_mode": "paper",
+            "execution_bridge": "signalstack"
+        }
+    ]
+}

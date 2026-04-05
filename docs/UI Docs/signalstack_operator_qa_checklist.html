@@ -1,0 +1,207 @@
+<div style="padding: 1rem 0; font-family: var(--font-sans);">
+
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 1.5rem;">
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 1rem; text-align: center;">
+    <div style="font-size: 13px; color: var(--color-text-secondary);">total checks</div>
+    <div id="total-count" style="font-size: 24px; font-weight: 500;">0</div>
+  </div>
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 1rem; text-align: center;">
+    <div style="font-size: 13px; color: var(--color-text-secondary);">known bugs</div>
+    <div style="font-size: 24px; font-weight: 500; color: var(--color-text-danger);">8</div>
+  </div>
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 1rem; text-align: center;">
+    <div style="font-size: 13px; color: var(--color-text-secondary);">new findings</div>
+    <div style="font-size: 24px; font-weight: 500; color: var(--color-text-warning);" id="new-count">0</div>
+  </div>
+  <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 1rem; text-align: center;">
+    <div style="font-size: 13px; color: var(--color-text-secondary);">assign to</div>
+    <div style="font-size: 14px; font-weight: 500;">CC / Codex / Cursor</div>
+  </div>
+</div>
+
+<div id="checklist"></div>
+
+<div style="margin-top: 1.5rem; display: flex; gap: 8px;">
+  <button onclick="copyBugList()">Copy all bugs as markdown</button>
+  <button onclick="sendPrompt('Write Claude Code prompts for all bugs marked NEW in the QA checklist')">Generate fix prompts ↗</button>
+</div>
+
+</div>
+
+<script>
+const sections = [
+  {
+    title: "API endpoint audit (contract vs reality)",
+    items: [
+      { id: "b1", text: "DELETE /api/v1/execution/{id} — endpoint missing entirely", status: "known", tool: "CC", cmd: "curl -X DELETE http://localhost:8090/api/v1/execution/1" },
+      { id: "b2", text: "PUT /api/v1/execution/{id} — endpoint for forward-tracking updates (exit_price, outcome, tags) — verify exists", status: "check", tool: "CC", cmd: "curl -X PUT http://localhost:8090/api/v1/execution/1 -H 'Content-Type: application/json' -d '{\"outcome\":\"WIN\"}'" },
+      { id: "b3", text: "GET /api/v1/execution/analytics — contract specifies win rate by tag/tier/source — verify exists", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/execution/analytics?period=last_30_days" },
+      { id: "b4", text: "GET /api/v1/sizing/:symbol/:direction — position sizing endpoint — verify exists", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/sizing/TRNO/LONG" },
+      { id: "b5", text: "GET /api/v1/candidates/:row_id — single candidate detail — verify exists", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates/meridian:TRNO:LONG:2026-03-30" },
+      { id: "b6", text: "API default source is 'combined', contract says 'meridian'", status: "known", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates | jq .source" },
+      { id: "b7", text: "API response missing top-level source and as_of fields", status: "known", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq '{source, as_of}'" },
+      { id: "n1", text: "POST /api/v1/reports/{id}/test — test send to Telegram — verify exists and actually sends", status: "new", tool: "CC", cmd: "curl -X POST http://localhost:8090/api/v1/reports/test_id/test" },
+    ]
+  },
+  {
+    title: "Data integrity — Meridian adapter",
+    items: [
+      { id: "b8", text: "TCN score = 0.5 everywhere — factor_history missing 7 columns, TCN falls back. Show null not 0.5", status: "known", tool: "CC+Codex", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq '.rows[0].native.tcn_score'" },
+      { id: "b9", text: "$0.00 prices — shortlist_daily.price is NULL, no daily_bars fallback", status: "known", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq '[.rows[] | select(.price == 0 or .price == null)] | length'" },
+      { id: "n2", text: "Meridian tier computation when TCN=null — should be 'meridian_untiered', not meridian_long/short based on stale 0.5", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq '[.rows[] | .tier] | unique'" },
+      { id: "n3", text: "Meridian LGBM v2 probs — predictions_daily may not have lgbm_long_prob/lgbm_short_prob columns yet after --real-ml run", status: "new", tool: "CC", cmd: "sqlite3 ~/SS/Meridian/data/v2_universe.db \"PRAGMA table_info(predictions_daily)\"" },
+      { id: "n4", text: "shortlist_daily has 60 rows (30L+30S) — verify ALL returned, not truncated", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq .total" },
+      { id: "n5", text: "Meridian predicted_return vs residual_alpha — contract shows both; are both populated or is one always null?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=meridian | jq '.rows[0].native | {predicted_return, residual_alpha}'" },
+    ]
+  },
+  {
+    title: "Data integrity — S1 adapter",
+    items: [
+      { id: "b10", text: "S1 $0.00 prices — no daily_bars fallback in s1_adapter.py", status: "known", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=s1 | jq '[.rows[] | select(.price == 0 or .price == null)] | length'" },
+      { id: "n6", text: "S1 convergence file — is mtime sort actually implemented? Glob pattern correct?", status: "check", tool: "CC", cmd: "ls -lt ~/SS/Advance/evening_results/convergence_*.json | head -3" },
+      { id: "n7", text: "S1 tier assignment — tier_dual requires RF>=0.60 AND NN>=0.75, but contract also says tier_rf needs Conv>=0.80. Is convergence_score from the right file for this check?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=s1 | jq '[.rows[] | .tier] | group_by(.) | map({(.[0]): length}) | add'" },
+      { id: "n8", text: "S1 BUY/SELL normalization — confirmed fixed per handoff, but verify SHORT rows actually appear", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=s1&direction=SHORT | jq .total" },
+      { id: "n9", text: "S1 partial_data flag — tickers not in convergence file should have partial_data=true. Is this surfaced to frontend?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=s1 | jq '[.rows[] | select(.native.convergence_score == 0)] | length'" },
+    ]
+  },
+  {
+    title: "Trade Desk + execution path",
+    items: [
+      { id: "n10", text: "picks/today — are ALL 7 tiers populated? Empty tiers might be silently dropped vs returned as empty arrays", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/picks/today | jq '[.tiers[] | .tier]'" },
+      { id: "n11", text: "picks/today tier_meridian_long — TCN>=0.70 threshold meaningless when TCN=0.5 fallback. Are meridian tiers returning candidates based on stale thresholds?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/picks/today | jq '.tiers[] | select(.tier==\"tier_meridian_long\") | .picks | length'" },
+      { id: "b11", text: "ATR stop calc uses fake percentages (1.5%/2%) — not real ATR from backend", status: "known", tool: "CC", cmd: "# Need GET /api/v1/sizing/:symbol/:direction to return real ATR" },
+      { id: "n12", text: "Execute endpoint — does POST /api/v1/execute actually call the SignalStack webhook or just log to DB?", status: "check", tool: "CC", cmd: "# Check unified_api.py for actual webhook call implementation" },
+      { id: "n13", text: "Execution log schema — contract specifies tags, notes, stop_loss, take_profit, order_type columns. Are these in the actual execution_log table or only the simpler schema?", status: "new", tool: "CC", cmd: "sqlite3 ~/SS/Vanguard/data/vanguard_universe.db \"PRAGMA table_info(execution_log)\"" },
+      { id: "n14", text: "Execute response returns webhook_response — is this the raw SignalStack response string or parsed status?", status: "check", tool: "CC", cmd: "# Check trade_desk.py execute handler" },
+    ]
+  },
+  {
+    title: "Userview system",
+    items: [
+      { id: "b12", text: "Userview restore incomplete — grouping not in WorkingState, filter/sort format mismatch", status: "known", tool: "CC+Cursor", cmd: "curl http://localhost:8090/api/v1/userviews | jq '.[] | {name, filters, sorts, grouping}'" },
+      { id: "n15", text: "System views — 11 presets specced. How many actually seeded? Are all source filters correct?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/userviews | jq '[.[] | select(.is_system==true)] | length'" },
+      { id: "b13", text: "S1 Short Picks system view has wrong source filter — shows Meridian data", status: "known", tool: "CC", cmd: "curl http://localhost:8090/api/v1/userviews | jq '.[] | select(.name | contains(\"Short\")) | {name, source, direction}'" },
+      { id: "n16", text: "Userview visible_columns and column_order — stored as JSON string in SQLite, but frontend expects array. Backend must return parsed arrays, not raw strings", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/userviews | jq '.[0] | {visible_columns: (.visible_columns | type), column_order: (.column_order | type)}'" },
+      { id: "n17", text: "Userview grouping field — DB has it, but WorkingState type in frontend doesn't include grouping. Restoring a view with grouping silently drops it", status: "new", tool: "Cursor", cmd: "# Check WorkingState type in unified-candidates-client.tsx" },
+      { id: "n18", text: "Custom view deletion — does DELETE return 403 for system views or silently succeed?", status: "check", tool: "CC", cmd: "# Get a system view ID and try DELETE" },
+    ]
+  },
+  {
+    title: "Frontend / UI bugs",
+    items: [
+      { id: "n19", text: "Trade Desk 'Trade' button on Candidates page — does clicking it actually write to localStorage trade-desk-store?", status: "check", tool: "Cursor", cmd: "# Click Trade on a candidate row, check localStorage" },
+      { id: "n20", text: "Candidates table — are null/missing native fields shown as '—' or blank? Contract says '—' in muted color", status: "check", tool: "Cursor", cmd: "# Visual inspection" },
+      { id: "n21", text: "Score formatting — probabilities should be 3 decimal (0.860), percents should have sign (+9.47%), currency should have $ — verify across all sources", status: "check", tool: "Cursor", cmd: "# Visual inspection of S1 vs Meridian columns" },
+      { id: "n22", text: "Direction badge colors — LONG rows should have green left border, SHORT should have red. Verify in both candidates table and Trade Desk", status: "check", tool: "Cursor", cmd: "# Visual inspection" },
+      { id: "n23", text: "Combined source view — Meridian-native fields (tcn_score, factor_rank) should show '—' for S1 rows and vice versa. Are they showing 0 or undefined instead?", status: "new", tool: "CC+Cursor", cmd: "curl 'http://localhost:8090/api/v1/candidates?source=combined' | jq '.rows[] | select(.source==\"s1\") | .native | {tcn_score, factor_rank}'" },
+      { id: "n24", text: "Reports page — built per handoff but 'not fully tested'. Does /reports route exist? Does it load without crash?", status: "check", tool: "Cursor", cmd: "open http://localhost:3000/reports" },
+    ]
+  },
+  {
+    title: "Field registry + dynamic columns",
+    items: [
+      { id: "n25", text: "Field registry — every field listed must be populated in candidate rows. Audit for phantom fields that return null/undefined for all rows", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/field-registry | jq length" },
+      { id: "n26", text: "Vanguard source fields in registry — vanguard adapter is placeholder. Does source=vanguard return empty or 500?", status: "new", tool: "CC", cmd: "curl http://localhost:8090/api/v1/candidates?source=vanguard" },
+      { id: "n27", text: "Field registry format types — 'score_0_1', 'percent', 'decimal_1', etc. Does frontend actually format based on these, or are they ignored?", status: "check", tool: "Cursor", cmd: "# Check how format field is used in column rendering" },
+    ]
+  },
+  {
+    title: "Infrastructure + automation",
+    items: [
+      { id: "n28", text: "Unified API (8090) not in boot_signalstack.sh — will it survive a reboot? Needs launchd plist or addition to boot script", status: "new", tool: "CC", cmd: "cat ~/SS/boot_signalstack.sh | grep 8090" },
+      { id: "n29", text: "CORS — API allows origin=* which is fine for dev, but health endpoint exposes webhook URL. Should it?", status: "check", tool: "CC", cmd: "curl http://localhost:8090/api/v1/health | jq .webhook" },
+      { id: "n30", text: "4 duplicate Telegram senders — risk of double-sending overlapping picks. Need dedup or consolidation plan", status: "new", tool: "Planning", cmd: "# Architectural decision" },
+      { id: "n31", text: "launchd evening/morning plists are independent of unified API — if evening pipeline fails, does morning report still fire with stale data?", status: "check", tool: "CC", cmd: "# Check morning report for staleness validation" },
+      { id: "n32", text: "Unified API has no auth — anyone on the network can POST /api/v1/execute and place real trades", status: "new", tool: "CC", cmd: "# Consider API key or localhost-only binding" },
+    ]
+  },
+  {
+    title: "Execution log schema drift",
+    items: [
+      { id: "n33", text: "execution_log table — BACKEND_SPEC has simpler schema (no tags, notes, stop_loss, take_profit). BACKEND_SPEC1 has extended schema. Which was actually built?", status: "new", tool: "CC", cmd: "sqlite3 ~/SS/Vanguard/data/vanguard_universe.db '.schema execution_log'" },
+      { id: "n34", text: "execution_log.account — is this populated when executing? Frontend Trade Log needs it to show which TTP account was used", status: "check", tool: "CC", cmd: "sqlite3 ~/SS/Vanguard/data/vanguard_universe.db 'SELECT account FROM execution_log LIMIT 5'" },
+      { id: "n35", text: "execution_log.source_scores — stored as JSON string. Is it actually being written on execute, or always null?", status: "check", tool: "CC", cmd: "sqlite3 ~/SS/Vanguard/data/vanguard_universe.db 'SELECT source_scores FROM execution_log LIMIT 3'" },
+    ]
+  }
+];
+
+const el = document.getElementById('checklist');
+let totalCount = 0;
+let newCount = 0;
+
+sections.forEach(sec => {
+  const secDiv = document.createElement('div');
+  secDiv.style.cssText = 'margin-bottom: 1.5rem;';
+
+  const h = document.createElement('h3');
+  h.style.cssText = 'font-size: 14px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 0.5px solid var(--color-border-tertiary);';
+  h.textContent = sec.title;
+  secDiv.appendChild(h);
+
+  sec.items.forEach(item => {
+    totalCount++;
+    if (item.status === 'new') newCount++;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 13px; line-height: 1.5;';
+
+    const badge = document.createElement('span');
+    badge.style.cssText = 'flex-shrink: 0; font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px; margin-top: 2px;';
+    if (item.status === 'known') {
+      badge.style.background = 'var(--color-background-danger)';
+      badge.style.color = 'var(--color-text-danger)';
+      badge.textContent = 'KNOWN';
+    } else if (item.status === 'new') {
+      badge.style.background = 'var(--color-background-warning)';
+      badge.style.color = 'var(--color-text-warning)';
+      badge.textContent = 'NEW';
+    } else {
+      badge.style.background = 'var(--color-background-info)';
+      badge.style.color = 'var(--color-text-info)';
+      badge.textContent = 'CHECK';
+    }
+
+    const toolBadge = document.createElement('span');
+    toolBadge.style.cssText = 'flex-shrink: 0; font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px; margin-top: 2px; background: var(--color-background-secondary); color: var(--color-text-secondary);';
+    toolBadge.textContent = item.tool;
+
+    const textSpan = document.createElement('span');
+    textSpan.style.cssText = 'flex: 1; color: var(--color-text-primary);';
+    textSpan.textContent = item.text;
+
+    row.appendChild(badge);
+    row.appendChild(toolBadge);
+    row.appendChild(textSpan);
+
+    if (item.cmd && !item.cmd.startsWith('#')) {
+      const cmdBtn = document.createElement('button');
+      cmdBtn.style.cssText = 'flex-shrink: 0; font-size: 10px; padding: 2px 8px; cursor: pointer;';
+      cmdBtn.textContent = 'copy cmd';
+      cmdBtn.onclick = () => { navigator.clipboard.writeText(item.cmd); cmdBtn.textContent = 'copied'; setTimeout(() => cmdBtn.textContent = 'copy cmd', 1500); };
+      row.appendChild(cmdBtn);
+    }
+
+    secDiv.appendChild(row);
+  });
+
+  el.appendChild(secDiv);
+});
+
+document.getElementById('total-count').textContent = totalCount;
+document.getElementById('new-count').textContent = newCount;
+
+function copyBugList() {
+  let md = '# SignalStack QA Bug List\n\n';
+  sections.forEach(sec => {
+    md += `## ${sec.title}\n\n`;
+    sec.items.forEach(item => {
+      const tag = item.status.toUpperCase();
+      md += `- [${tag}] [${item.tool}] ${item.text}\n`;
+      if (item.cmd && !item.cmd.startsWith('#')) md += `  \`${item.cmd}\`\n`;
+    });
+    md += '\n';
+  });
+  navigator.clipboard.writeText(md);
+}
+</script>
+</div>

@@ -1,0 +1,2556 @@
+INFO:     Started server process [60345]
+INFO:     Waiting for application startup.
+2026-03-30 18:38:33 [INFO] vanguard.api.userviews — Seeded 4 system views (delete+reseed)
+2026-03-30 18:38:33 [INFO] vanguard.api.accounts — Account profiles seeded
+2026-03-30 18:38:33 [INFO] unified_api — Unified API started — DB tables ready
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8090 (Press CTRL+C to quit)
+INFO:     Started server process [60517]
+INFO:     Waiting for application startup.
+2026-03-30 18:38:47 [INFO] vanguard.api.userviews — Seeded 4 system views (delete+reseed)
+2026-03-30 18:38:47 [INFO] vanguard.api.accounts — Account profiles seeded
+2026-03-30 18:38:47 [INFO] unified_api — Unified API started — DB tables ready
+INFO:     Application startup complete.
+ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8090): [errno 48] address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Started server process [61473]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/opt/homebrew/lib/python3.14/site-packages/starlette/routing.py", line 694, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/fastapi/routing.py", line 237, in __aenter__
+    await self._router._startup()
+  File "/opt/homebrew/lib/python3.14/site-packages/fastapi/routing.py", line 4880, in _startup
+    await handler()
+  File "/Users/sjani008/SS/Vanguard/vanguard/api/unified_api.py", line 60, in startup
+    uv_module.seed_system_views()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/sjani008/SS/Vanguard/vanguard/api/userviews.py", line 107, in seed_system_views
+    con.execute("DELETE FROM userviews WHERE is_system = 1")
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+
+ERROR:    Application startup failed. Exiting.
+INFO:     127.0.0.1:64956 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64956 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64956 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64956 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65277 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65280 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65281 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65284 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65286 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65287 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65277 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65280 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65281 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65284 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65287 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65277 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65286 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65280 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65281 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65284 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65284 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65284 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65322 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65324 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65325 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65325 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65324 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65322 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65344 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65346 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65347 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65346 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65347 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65344 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65386 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65388 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65389 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65386 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65389 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65388 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65403 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65405 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65406 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65405 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65406 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65403 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65422 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65424 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65425 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65424 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65425 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65422 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65431 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65433 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65434 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65434 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65433 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65431 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65457 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65458 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65459 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65457 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65458 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65459 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65472 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65474 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65475 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65472 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65475 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65474 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65482 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65484 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65485 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65482 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65485 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65484 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65507 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65509 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65510 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65507 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65509 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65510 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65523 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65525 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65526 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65523 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65526 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65525 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49159 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49160 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49161 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49160 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49161 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49163 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49170 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49171 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49173 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49170 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49171 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49173 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49191 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49192 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49194 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49191 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49192 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49194 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49229 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49231 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49232 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49229 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49231 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49232 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49244 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49246 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49247 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49244 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49247 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49246 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49269 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49272 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49273 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49269 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49272 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49273 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49298 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49300 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49301 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49298 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49301 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49300 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49333 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49335 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49336 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49333 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49335 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49336 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49369 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49372 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49373 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49369 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49373 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49372 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49393 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49395 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49397 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49393 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49395 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49397 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49423 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49425 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49427 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49423 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49427 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49433 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49440 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49443 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49444 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49440 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49444 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49443 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49468 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49470 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49471 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49468 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49470 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49471 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49509 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49510 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49512 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49509 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49510 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49512 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49519 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49522 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49523 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49519 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49523 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49522 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49533 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49537 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49537 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49561 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49562 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49564 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49562 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49564 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49561 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49576 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49578 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49580 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49576 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49578 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49580 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49597 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49599 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49602 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49597 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49599 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49602 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49619 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49622 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49623 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49619 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49622 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49623 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49634 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49637 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49638 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49634 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49638 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49637 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49655 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49658 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49660 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49655 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49660 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49658 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49680 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49682 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49684 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49680 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49682 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49684 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49711 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49712 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49714 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49711 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49714 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49712 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49729 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49730 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49732 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49729 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49730 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49732 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49752 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49754 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49756 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49752 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49756 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49754 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49795 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49798 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49799 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49795 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49798 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49799 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49839 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49841 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49842 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49842 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49841 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49839 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49862 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49865 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49866 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49862 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49866 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49865 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49884 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49887 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49888 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49884 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49887 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49888 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49893 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49894 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49896 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49893 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49896 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49894 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49911 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49913 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49914 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49911 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49914 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49916 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49946 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49948 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49950 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49946 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49950 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49948 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49967 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49970 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49971 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49967 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49970 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49971 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49982 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49983 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49985 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49983 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49985 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49987 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50009 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50011 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50012 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50011 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50012 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50009 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50026 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50027 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50028 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50028 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50027 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50026 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50056 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50057 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50058 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50057 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50058 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50056 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50070 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50072 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50074 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50076 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50074 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50072 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50096 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50099 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50100 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50099 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50100 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50103 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50122 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50123 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50124 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50122 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50124 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50123 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50139 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50141 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50143 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50139 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50141 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50143 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50155 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50157 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50159 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50155 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50157 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50159 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50176 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50178 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50180 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50176 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50180 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50178 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50202 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50204 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50205 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50202 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50204 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50205 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50218 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50221 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50222 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50218 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50221 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50222 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50235 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50237 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50238 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50235 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50238 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50240 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50253 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50254 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50255 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50253 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50255 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50254 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50265 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50269 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50270 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50269 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50270 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50272 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50288 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50291 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50292 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50288 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50292 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50299 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50305 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50308 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50308 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50310 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50319 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50322 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50323 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50319 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50322 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50323 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50347 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50348 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50349 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50348 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50347 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50349 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50383 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50386 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50387 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50387 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50386 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50383 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50411 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50413 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50414 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50411 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50413 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50414 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50459 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50462 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50463 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50462 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50463 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50459 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50482 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50484 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50485 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50482 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50484 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50488 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50533 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50535 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50536 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50535 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50536 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50533 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50514 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50516 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50519 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50520 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50523 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50524 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50514 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50516 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50524 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50523 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50520 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50519 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50514 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50516 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50524 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50523 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50544 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50544 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50546 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50546 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50546 - "OPTIONS /api/v1/candidates?source=vanguard&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50546 - "GET /api/v1/candidates?source=vanguard&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50548 - "OPTIONS /api/v1/candidates?source=vanguard&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50548 - "GET /api/v1/candidates?source=vanguard&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50556 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50554 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50562 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50564 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50566 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50562 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50564 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50566 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50573 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50576 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50577 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50576 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50573 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50577 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50580 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50581 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50583 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50580 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50581 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50583 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50673 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50674 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50676 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50673 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50676 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50674 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50759 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50759 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50761 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50759 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50799 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50802 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50803 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50802 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50799 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50803 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50806 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50808 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50809 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50808 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50809 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50806 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "OPTIONS /api/v1/portfolio/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50816 - "GET /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50814 - "GET /api/v1/portfolio/state HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ttp_40k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ttp_40k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ttp_50k_intraday HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ttp_50k_intraday HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ttp_100k_intraday HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ttp_100k_intraday HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/topstep_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/topstep_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ftmo_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ftmo_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50818 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50820 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50823 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50824 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50818 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50820 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50824 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50823 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50826 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50830 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50826 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50830 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50830 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50830 - "GET /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50830 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50826 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50833 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50834 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50830 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50833 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50834 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50826 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50836 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50839 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50840 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50836 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50840 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50839 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50829 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "GET /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50848 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50850 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50848 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50829 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50850 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50850 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50850 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50854 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50857 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50858 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50854 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50857 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50858 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50858 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50857 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50854 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50854 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50857 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50858 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50860 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50863 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50864 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50867 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50868 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50860 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50868 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50867 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50864 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50870 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50872 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50875 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50876 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50872 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50875 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50876 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50879 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50881 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50882 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50881 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50882 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50885 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50887 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50889 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50891 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50895 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50891 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50895 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50889 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50887 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50906 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50907 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50906 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50907 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50909 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50920 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50921 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50921 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50920 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50913 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "GET /api/v1/reports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50919 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50913 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50915 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50925 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50927 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50928 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50928 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50927 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50925 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50936 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50937 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50939 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50937 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50939 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50936 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50941 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50944 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50945 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50941 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50944 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50945 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50948 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50950 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50951 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50948 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50951 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50950 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50953 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50956 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50957 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50956 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50953 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50957 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50960 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50963 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50964 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50960 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50963 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50964 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50966 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50969 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50970 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50966 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50969 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50970 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50973 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50976 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50977 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50973 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50976 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50977 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50979 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50982 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50983 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50979 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50982 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50983 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50985 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50988 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50989 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50989 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50988 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50985 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50992 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50996 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50992 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50996 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50998 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51001 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51002 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50998 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51001 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51002 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51005 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51007 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51008 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51007 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51005 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51008 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51012 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51015 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51016 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51012 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51015 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51016 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51020 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51022 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51024 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51022 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51020 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51024 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51027 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51028 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51030 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51027 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51028 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51030 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51032 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51035 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51036 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51032 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51035 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51036 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51038 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51041 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51042 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51038 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51041 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51042 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51045 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51047 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51048 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51045 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51047 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51048 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51053 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51056 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51057 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51056 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51053 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51057 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51076 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51078 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51080 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51078 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51076 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51080 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51084 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51085 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51087 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51087 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51085 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51084 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51091 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51094 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51095 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51091 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51094 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51095 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51097 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51099 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51101 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51097 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51099 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51101 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51103 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51106 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51107 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51107 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51106 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51103 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51111 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51114 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51115 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51111 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51114 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51115 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51122 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51125 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51126 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51122 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51125 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51126 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51130 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51131 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51133 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51131 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51133 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51130 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51138 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51141 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51142 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51138 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51142 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51141 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51154 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51157 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51158 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51154 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51157 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51158 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51161 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51163 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51164 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51161 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51164 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51163 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51167 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51169 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51171 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51167 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51169 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51171 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51173 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51176 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51177 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51173 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51176 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51177 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51181 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51182 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51183 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51185 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51183 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51182 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51187 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51189 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51191 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51189 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51191 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51187 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51198 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51201 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51202 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51201 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51198 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51202 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51204 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51206 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51204 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51206 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51208 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51204 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51215 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51217 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51219 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51220 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51222 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51224 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51215 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51217 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51224 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51222 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51220 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51215 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51219 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51217 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51224 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51222 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51222 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51222 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51228 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51231 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51232 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51228 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51231 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51232 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51234 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51234 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51234 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51239 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51240 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51241 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51243 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51239 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51241 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51240 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51247 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51250 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51251 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51250 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51251 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51247 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51255 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51257 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51258 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51257 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51258 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51255 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51260 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51262 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51264 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51260 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51262 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51264 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51266 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51269 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51271 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51272 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51266 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51271 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51269 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51272 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51269 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51269 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51275 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51277 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51278 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51277 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51278 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51275 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51275 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51275 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51281 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51285 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51281 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51285 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51287 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51287 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51294 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51295 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51297 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51295 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51297 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51294 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51299 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51302 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51303 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51299 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51302 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51303 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51310 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51312 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51313 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51313 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51312 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51310 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51320 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51323 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51324 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51323 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51324 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51320 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51330 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51332 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51333 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51332 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51330 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51333 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51335 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51338 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51339 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51335 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51338 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51339 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51345 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51347 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51349 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51347 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51345 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51349 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51353 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51354 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51355 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51353 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51354 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51355 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51358 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51361 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51362 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51358 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51361 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51362 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51368 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51371 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51372 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51371 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51368 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51372 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51376 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51377 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51379 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51377 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51379 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51381 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51385 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51381 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51385 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51387 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51390 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51391 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51387 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51390 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51391 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51395 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51397 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51398 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51397 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51398 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51395 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51401 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51404 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51405 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51404 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51405 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51401 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51412 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51413 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51415 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51415 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51413 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51412 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51420 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51421 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51422 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51420 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51421 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51422 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51457 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51460 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51461 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51457 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51460 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51461 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51488 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51490 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51492 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51492 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51490 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51488 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51497 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51498 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51499 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51498 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51497 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51499 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51515 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51517 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51518 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51519 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51522 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51523 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51517 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51518 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51519 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51522 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51523 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51515 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51517 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51518 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51519 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51525 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51528 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51529 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51525 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51528 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51529 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51532 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51534 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51535 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51532 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51534 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51535 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51543 - "OPTIONS /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51543 - "GET /api/v1/candidates?source=s1&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51545 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51548 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51549 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51545 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51548 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51549 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51552 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51554 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51555 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51554 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51555 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51552 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51537 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51540 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51541 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51537 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51540 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51560 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51562 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51565 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51566 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51562 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51565 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51566 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51579 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51582 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51583 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51579 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51582 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51583 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51585 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51587 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51589 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51589 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51587 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51585 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51599 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51602 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51604 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51606 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51608 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51609 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51599 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51602 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51604 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51606 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51608 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51609 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51599 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51602 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51613 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51616 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51617 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51613 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51616 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51617 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51621 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51622 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51621 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51622 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51624 - "OPTIONS /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51626 - "GET /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51624 - "OPTIONS /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51624 - "GET /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51633 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51635 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51637 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51635 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51637 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51633 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51641 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51643 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51644 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51641 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51644 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51646 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51628 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51628 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51648 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51628 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51655 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51657 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51655 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51653 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51657 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51650 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51650 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51659 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51650 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51661 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51661 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51669 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51670 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51661 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51669 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51685 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51686 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51688 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51686 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51685 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51688 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51693 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51694 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51695 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51693 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51694 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51697 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51680 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51704 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51680 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51707 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51709 - "OPTIONS /api/v1/execution/log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51711 - "OPTIONS /api/v1/execution/analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51714 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51704 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51680 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51707 - "GET /api/v1/execution/log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51709 - "GET /api/v1/execution/analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51711 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51725 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51727 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51729 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51731 - "OPTIONS /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51733 - "OPTIONS /api/v1/portfolio/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51734 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51725 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51727 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51729 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51731 - "GET /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51733 - "GET /api/v1/portfolio/state HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51734 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51739 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51742 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51743 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51739 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51742 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51743 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51750 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51753 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51755 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51756 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51750 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51753 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51755 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51756 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51756 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51755 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51768 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51771 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51772 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51772 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51771 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51768 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51774 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51776 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51778 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51776 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51778 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51774 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51761 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51762 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51761 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51788 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51789 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51792 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51793 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51762 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51761 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51788 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51789 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51792 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51793 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51762 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51798 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51801 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51802 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51801 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51802 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51798 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51806 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51809 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51811 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51813 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51815 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51816 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51806 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51809 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51811 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51813 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51815 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51816 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51806 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51809 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51822 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51826 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51826 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51822 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51828 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51830 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51832 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51830 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51828 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51834 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51837 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51838 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51837 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51840 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51844 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51846 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51848 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51844 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51848 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51846 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51854 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51855 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51854 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51855 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51864 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51866 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51868 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51866 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51868 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51864 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51871 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51873 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51874 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51873 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51874 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51871 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51857 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51859 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51857 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51859 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51878 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51880 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51878 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51880 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51888 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51890 - "OPTIONS /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51892 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51880 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51888 - "GET /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51890 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51899 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51901 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51903 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51899 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51903 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51901 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51896 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51896 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51908 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51910 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51911 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51896 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51908 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51910 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51910 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51908 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51915 - "OPTIONS /api/v1/accounts/ftmo_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51915 - "GET /api/v1/accounts/ftmo_100k HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51922 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51924 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51922 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51926 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51924 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51926 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51919 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51929 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51919 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51931 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51934 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51936 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51937 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51934 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51937 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51936 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51939 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51939 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51946 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51948 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51950 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51948 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51946 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51950 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51941 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51952 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51941 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51941 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51952 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51941 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51952 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51959 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51962 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51963 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51941 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51952 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51959 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51962 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51970 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51972 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51974 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51972 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51970 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51974 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51976 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51980 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51980 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51976 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51983 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51984 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51983 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51984 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51987 - "OPTIONS /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51988 - "OPTIONS /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51987 - "GET /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51991 - "GET /api/v1/candidates?source=combined&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51997 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51999 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52001 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51997 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51999 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52010 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52020 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52023 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52024 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52023 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52020 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52024 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52028 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52029 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52028 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52029 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52041 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52043 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52044 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52043 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52044 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52041 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52048 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52050 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52052 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52048 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52050 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52052 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52032 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52033 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52032 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52033 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52066 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52069 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52070 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52069 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52070 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52066 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52062 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52064 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52062 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52074 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52076 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52078 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52080 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52078 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52076 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52080 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52082 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52084 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52086 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52082 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52086 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52084 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52095 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52094 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52095 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52102 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52105 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52106 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52102 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52105 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52106 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52098 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52099 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52109 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52098 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52117 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52113 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52115 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52117 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52120 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52122 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52123 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52122 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52123 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52129 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52130 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52129 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52130 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52136 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52139 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52140 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52139 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52140 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52136 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52132 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52134 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52132 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52134 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52149 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52152 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52153 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52152 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52153 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52149 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52157 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52159 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52161 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52157 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52159 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52161 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52145 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52146 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52145 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52146 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52168 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52170 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52172 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52170 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52172 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52168 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52164 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52166 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52164 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52174 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52176 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52178 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52180 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52180 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52178 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52176 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52183 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52185 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52186 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52183 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52185 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52186 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52193 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52194 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52193 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52194 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52200 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52202 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52204 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52200 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52204 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52202 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52196 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52198 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52196 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52207 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52212 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52214 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52216 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52212 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52214 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52216 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52219 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52221 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52222 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52219 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52221 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52222 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52226 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52227 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52227 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52233 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52235 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52237 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52235 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52237 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52233 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52229 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52231 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52229 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52231 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52243 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52246 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52247 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52246 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52247 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52243 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52249 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52252 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52253 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52253 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52252 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52249 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52240 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52241 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52240 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52241 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52269 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52271 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52273 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52271 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52273 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52269 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52263 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52265 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52263 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52265 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52284 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52287 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52288 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52284 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52287 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52288 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52291 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52293 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52294 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52294 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52293 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52291 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52277 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52277 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52300 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52303 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52304 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52304 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52303 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52300 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52296 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52298 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52296 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52298 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52318 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52320 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52322 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52318 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52320 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52322 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52326 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52328 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52329 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52326 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52328 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52329 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52309 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52311 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52309 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52311 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52338 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52340 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52342 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52338 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52340 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52342 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52334 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52336 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52334 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52336 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52350 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52353 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52354 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52353 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52350 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52354 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52356 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52358 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52360 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52360 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52358 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52356 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52345 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52347 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52345 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52362 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52364 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52366 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52368 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52366 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52368 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52364 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52371 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52372 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52371 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52372 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52379 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52381 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52383 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52381 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52383 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52379 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52385 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52388 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52389 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52385 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52389 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52388 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52375 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52376 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52376 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52397 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52399 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52401 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52399 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52401 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52397 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52392 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52394 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52392 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52394 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52407 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52409 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52411 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52411 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52409 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52407 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52415 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52416 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52417 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52417 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52416 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52415 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52403 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52405 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52403 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52405 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52424 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52427 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52428 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52424 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52427 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52428 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52419 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52421 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52419 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52421 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52435 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52438 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52439 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52435 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52438 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52439 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52442 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52444 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52445 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52445 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52444 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52431 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52432 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52431 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52432 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52452 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52454 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52456 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52456 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52454 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52452 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52449 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52450 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52449 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52450 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52465 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52467 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52469 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52467 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52465 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52469 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52471 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52473 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52475 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52473 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52471 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52475 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52458 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52460 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52458 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52478 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52481 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52483 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52485 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52483 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52485 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52481 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52489 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52490 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52489 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52490 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52496 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52498 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52500 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52498 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52500 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52496 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52503 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52504 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52506 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52503 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52508 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52510 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52493 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52494 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52493 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52494 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52517 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52519 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52521 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52517 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52519 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52521 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52513 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52515 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52513 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52523 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52527 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52529 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52531 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52529 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52527 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52531 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52534 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52536 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52537 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52537 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52536 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52534 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52541 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52542 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52541 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52542 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52550 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52552 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52550 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52552 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52545 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52546 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52545 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52546 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52560 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52562 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52564 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52564 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52562 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52560 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52566 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52568 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52570 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52570 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52568 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52566 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52555 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52557 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52555 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52575 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52577 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52579 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52581 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52579 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52581 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52577 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52584 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52585 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52584 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52585 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52591 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52594 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52595 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52591 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52595 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52594 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52598 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52600 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52601 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52598 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52600 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52601 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52587 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52589 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52587 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52606 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52608 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52611 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52612 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52608 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52611 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52612 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52615 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52616 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52615 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52616 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52622 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52625 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52626 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52622 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52625 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52626 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52632 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52633 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52635 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52633 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52635 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52632 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52618 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52620 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52618 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52646 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52648 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52651 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52652 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52651 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52652 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52648 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52658 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52659 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52661 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52663 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52658 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52659 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52661 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52666 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52668 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52671 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52668 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52673 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52675 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52677 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52679 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52675 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52677 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52679 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52683 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52684 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52685 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52683 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52684 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52685 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52688 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52689 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52688 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52689 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52695 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52697 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52699 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52695 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52697 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52699 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52691 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52693 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52691 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52693 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52706 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52709 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52710 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52706 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52709 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52710 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52714 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52716 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52717 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52714 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52716 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52717 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52701 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52703 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52701 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52720 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52723 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52724 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52726 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52724 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52726 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52723 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52729 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52730 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52729 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52732 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52734 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52737 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52738 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52737 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52734 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52738 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52742 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52743 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52744 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52742 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52744 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52743 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52749 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52750 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52749 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52750 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52757 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52758 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52760 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52758 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52757 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52760 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52752 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52754 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52752 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52754 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52773 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52773 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52777 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52777 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52780 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52782 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52783 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52780 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52783 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52782 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52764 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52766 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52764 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52766 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52801 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52804 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52805 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52801 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52804 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52805 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52797 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52799 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52797 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52799 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52824 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52828 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52826 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52824 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52828 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52832 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52833 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52834 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52832 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52834 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52833 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52820 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52822 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52820 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52874 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52876 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52878 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52880 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52878 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52880 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52876 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52883 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52884 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52883 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52884 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52890 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52893 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52894 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52894 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52893 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52890 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52898 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52900 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52901 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52898 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52900 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52901 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52886 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52886 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52909 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52910 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52912 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52910 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52909 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52912 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52904 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52906 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52904 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52906 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52919 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52922 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52923 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52919 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52922 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52923 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52926 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52928 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52929 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52928 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52926 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52929 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52914 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52916 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52914 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52916 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52936 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52939 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52940 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52936 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52939 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52940 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52931 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52933 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52931 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52933 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52946 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52948 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52950 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52946 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52948 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52950 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52954 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52955 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52956 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52954 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52955 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52956 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52942 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52944 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52942 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52944 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52966 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52969 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52970 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52966 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52969 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52970 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52962 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52964 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52962 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52964 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52997 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53000 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53001 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52997 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53000 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53001 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53010 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53011 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53012 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53010 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53011 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53012 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53040 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53041 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53042 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53040 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53042 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53041 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53054 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53055 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53056 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53054 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53055 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53056 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53078 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53080 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53081 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53081 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53080 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53078 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53119 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53122 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53123 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53122 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53123 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53119 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53138 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53140 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53141 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53140 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53141 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53138 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53146 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53147 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53148 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53146 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53147 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53148 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53154 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53155 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53156 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53154 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53155 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53156 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53164 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53165 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53166 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53164 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53165 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53166 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53171 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53173 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53174 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53171 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53173 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53174 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53183 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53188 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53191 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53194 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53196 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53197 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53194 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53196 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53197 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53202 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53208 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53210 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53211 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53208 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53210 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53211 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53217 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53218 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53219 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53217 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53218 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53219 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53229 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53231 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53232 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53231 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53232 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53229 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     76.67.55.58:0 - "GET /api/v1/candidates?source=meridian&page=1&page_size=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53243 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53245 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53246 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53243 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53245 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53246 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53117 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53096 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53113 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53115 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53267 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53269 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53270 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53269 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53267 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53270 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53301 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53304 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53305 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53301 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53304 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53305 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53321 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53323 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53324 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53323 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53324 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53321 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     54.176.157.9:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     54.176.157.9:0 - "GET /api/portfolio/state HTTP/1.1" 404 Not Found
+INFO:     64.23.206.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     64.23.206.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     147.182.199.40:0 - "GET / HTTP/1.1" 404 Not Found
+INFO:     64.23.206.58:0 - "GET / HTTP/1.1" 404 Not Found
+INFO:     147.182.199.40:0 - "OPTIONS /api/portfolio/state HTTP/1.1" 200 OK
+INFO:     54.176.157.9:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     54.176.157.9:0 - "GET /api/trades/log HTTP/1.1" 404 Not Found
+INFO:     147.182.199.40:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     147.182.199.40:0 - "OPTIONS /api/candidates HTTP/1.1" 200 OK
+INFO:     147.182.199.40:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     147.182.199.40:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     64.23.206.58:0 - "OPTIONS /api/portfolio/state HTTP/1.1" 200 OK
+INFO:     147.182.199.40:0 - "OPTIONS /api/trades/log HTTP/1.1" 200 OK
+INFO:     64.23.206.58:0 - "OPTIONS /api/candidates HTTP/1.1" 200 OK
+INFO:     64.23.206.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     64.23.206.58:0 - "OPTIONS /api/trades/log HTTP/1.1" 200 OK
+INFO:     54.176.157.9:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     54.176.157.9:0 - "GET /api/candidates HTTP/1.1" 404 Not Found
+INFO:     18.144.21.255:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     18.144.21.255:0 - "GET /api/portfolio/state HTTP/1.1" 404 Not Found
+INFO:     18.144.21.255:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     18.144.21.255:0 - "GET /api/trades/log HTTP/1.1" 404 Not Found
+INFO:     18.144.21.255:0 - "GET /api/candidates HTTP/1.1" 404 Not Found
+INFO:     18.144.21.255:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/userviews HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53383 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53386 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53387 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53386 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53387 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53383 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     18.144.21.255:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     18.144.21.255:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/execution/analytics HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/execution/log HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/trades/log HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/trades/log HTTP/1.1" 404 Not Found
+INFO:     76.67.55.58:0 - "GET /api/v1/execution/analytics HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/execution/log HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/portfolio/live HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts/ttp_20k_swing HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     76.67.55.58:0 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53421 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53423 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53424 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53421 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53423 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53424 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53433 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53436 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53433 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53436 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65398 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65400 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65401 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65398 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65401 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65400 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65408 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65411 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65412 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65411 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65408 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65412 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65416 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65421 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65423 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65425 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65421 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65423 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65425 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65428 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65430 - "GET /api/v1/candidates?source=meridian&direction=LONG HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65429 - "GET /api/v1/field-registry HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65432 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65433 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65436 - "OPTIONS /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65438 - "OPTIONS /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65440 - "OPTIONS /api/v1/system/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65436 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65438 - "GET /api/v1/data/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65440 - "GET /api/v1/system/status HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [60345]

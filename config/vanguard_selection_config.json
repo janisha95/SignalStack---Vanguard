@@ -1,0 +1,44 @@
+{
+    "regime_gate": {
+        "atr_caution_threshold": 2.0,
+        "volume_dead_threshold": 0.5,
+        "lunch_hour_start_et": "12:00",
+        "lunch_hour_end_et": "13:00"
+    },
+    "ml_gate": {
+        "default_threshold": 0.50
+    },
+    "risk_reward": {
+        "default_tp_pct_by_asset_class": {
+            "equity":    0.015,
+            "forex":     0.003,
+            "index":     0.005,
+            "metal":     0.008,
+            "crypto":    0.020,
+            "commodity": 0.010
+        },
+        "default_sl_pct_by_asset_class": {
+            "equity":    0.008,
+            "forex":     0.002,
+            "index":     0.003,
+            "metal":     0.005,
+            "crypto":    0.012,
+            "commodity": 0.007
+        },
+        "spread_cost_proxy": 0.0005,
+        "expected_bars_default": 12
+    },
+    "session_open": {
+        "max_bars_from_open": 12
+    },
+    "llm_strategy": {
+        "enabled": false,
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "news_feed": "yahoo_finance_rss",
+        "max_candidates_per_prompt": 10,
+        "top_k_picks": 5,
+        "timeout_seconds": 30,
+        "fallback_on_timeout": "skip"
+    }
+}

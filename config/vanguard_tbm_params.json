@@ -1,0 +1,47 @@
+{
+  "equity": {
+    "tp_mult": 2.0,
+    "sl_mult": 1.0,
+    "horizon_bars": 6,
+    "rr_ratio": 2.0,
+    "session_end": "16:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_equity_atr_v1"
+  },
+  "forex": {
+    "tp_mult": 2.0,
+    "sl_mult": 1.0,
+    "horizon_bars": 12,
+    "rr_ratio": 2.0,
+    "session_end": "17:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_forex_atr_v1"
+  },
+  "commodity": {
+    "tp_mult": 2.0,
+    "sl_mult": 1.0,
+    "horizon_bars": 6,
+    "rr_ratio": 2.0,
+    "session_end": "17:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_commodity_atr_v1"
+  },
+  "crypto": {
+    "tp_mult": 2.0,
+    "sl_mult": 1.0,
+    "horizon_bars": 6,
+    "rr_ratio": 2.0,
+    "session_end": null,
+    "session_tz": "UTC",
+    "version": "tbm_crypto_atr_v1"
+  },
+  "index": {
+    "tp_mult": 2.0,
+    "sl_mult": 1.0,
+    "horizon_bars": 8,
+    "rr_ratio": 2.0,
+    "session_end": "16:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_index_atr_v1"
+  }
+}
