@@ -25,6 +25,80 @@ Plus 3 safety features the user explicitly asked for: drawdown auto-pause, news 
 6. **No fallback to old hardcoded path.** Old code paths for GFT rules are deleted, not commented out. Audit rule: `grep -i "GFT" vanguard_risk_filters.py | grep -v "policy_id\|profile_id"` must return near-zero matches after this phase.
 
 ---
+Addendum 2 — Profile/Policy Precedence
+Paste target: CC_PHASE_2B_JSON_POLICY.md, new section before §2 "What to build"
+
+1.5 Profile/policy precedence
+Rule: when multiple rule layers apply, precedence is strictly:
+
+temporary_overrides[profile_id] — time-bounded, whitelisted fields only
+policy_templates[profile.policy_id] — the assigned policy template
+risk_defaults — global fallbacks
+
+Higher layer wins per-field. If a field is absent at layer 1, check layer 2. If absent at layer 2, check layer 3. If absent everywhere, raise PolicyFieldMissing at config load — never default silently.
+Hard constraint — no inline per-profile policy overrides
+A profile cannot override individual policy fields inline. This is invalid:
+json// ❌ INVALID — do not allow
+{
+  "id": "gft_10k",
+  "policy_id": "gft_standard_v1",
+  "max_positions_override": 2,
+  "risk_per_trade_pct_override": 0.003
+}
+If gft_10k needs different rules than gft_5k, create a separate policy template and point the profile to it:
+json// ✅ CORRECT
+{
+  "policy_templates": {
+    "gft_standard_v1": { "position_limits": {"max_open_positions": 3}, ... },
+    "gft_10k_v1":      { "position_limits": {"max_open_positions": 2}, ... }
+  },
+  "profiles": [
+    {"id": "gft_5k",  "policy_id": "gft_standard_v1"},
+    {"id": "gft_10k", "policy_id": "gft_10k_v1"}
+  ]
+}
+Why: policy templates stay auditable. Any given profile's effective rules = one named template, not a template + scattered inline patches. Future debugging becomes "read policy X" instead of "read template + read profile overrides + read defaults + diff".
+Temporary overrides — strict whitelist
+temporary_overrides[profile_id] may only contain keys from this whitelist:
+FieldTypePurposeside"LONG_ONLY" | "SHORT_ONLY" | "BOTH"Temporarily restrict directionmax_positionsintTemporarily tighten position capis_pausedboolManually halt new entries for this profileexpires_at_utcISO 8601 strRequired on every overridereasonstrRequired — human-readable justification
+Any other key in temporary_overrides is a config validation error. Config loader refuses to start.
+If a profile needs a different sizing rule, reject rule, or holding rule temporarily → it's not a temporary override, it's a new policy template. Swap the policy_id on the profile instead.
+Expiry
+Expired overrides are ignored (not auto-deleted). Config admin UI should surface expired overrides for cleanup, but the policy engine treats now_utc > expires_at_utc as "override does not apply." No silent extension.
+Resolver: Vanguard_QAenv/vanguard/accounts/policy_resolver.py (new)
+pythondef resolve_effective_policy(config, profile_id, now_utc) -> dict:
+    """
+    Returns the effective policy dict for this profile at this moment.
+    Steps:
+      1. Load policy_templates[profile.policy_id] (layer 2)
+      2. Overlay risk_defaults for any missing fields (layer 3 fallback)
+      3. Overlay active temporary_overrides[profile_id] whitelisted fields (layer 1)
+      4. Validate: all required fields present, else raise PolicyFieldMissing
+    Output is the resolved dict the policy_engine consumes. Pure function.
+    """
+
+def validate_override_whitelist(overrides_block: dict) -> list[str]:
+    """
+    Returns list of validation errors. Called at config load.
+    Rejects any key not in the whitelist.
+    """
+The policy engine never reads policy_templates or temporary_overrides directly. It only sees the output of resolve_effective_policy().
+Acceptance tests (add to Phase 2b §3)
+Test 13 — Precedence: override beats policy
+Policy sets max_positions=3, override sets max_positions=1 (unexpired). Resolved policy has max_positions=1. Inject 2 candidates — second blocked.
+Test 14 — Precedence: expired override ignored
+Override with expires_at_utc in the past. Resolved policy uses layer 2 value.
+Test 15 — Whitelist enforcement at config load
+Add temporary_overrides.gft_10k.risk_per_trade_pct: 0.01 (non-whitelisted key). Start orchestrator.
+Expect: ConfigValidationError: temporary_overrides.gft_10k contains non-whitelisted key 'risk_per_trade_pct'. Orchestrator refuses to start.
+Test 16 — Inline profile override rejected
+Add max_positions_override: 2 to a profile entry. Start orchestrator.
+Expect: ConfigValidationError: profile 'gft_10k' contains inline field 'max_positions_override' — use a separate policy_template instead.
+Test 17 — Missing required field fails loud
+Remove position_limits.max_open_positions from policy template and risk_defaults. Call resolve_effective_policy().
+Expect: raises PolicyFieldMissing: position_limits.max_open_positions. No silent default.
+Test 18 — Two profiles, two policies, zero cross-contamination
+gft_5k → gft_standard_v1 (max=3), gft_10k → gft_10k_v1 (max=2). Verify resolved policies differ for the same field. Verify modifying one template does not affect the other profile's resolved policy.
 
 ## 2. What to build
 

@@ -7,18 +7,25 @@
 
 ## Execution order (strict)
 
-| # | Spec | Est time | Gate to pass |
-|---|---|---|---|
-| 1 | `CC_PHASE_0_PARITY_HARNESS.md` | 30–45 min | QA matches Prod byte-for-byte on full pipeline |
-| 2 | `CC_PHASE_2A_UNIVERSE_RESOLVER.md` | 1.5–2 hr | Resolved universe works in observe + enforce mode |
-| 3 | `CC_PHASE_2B_JSON_POLICY.md` | 2–2.5 hr | V6 is pure JSON interpreter, no hardcoded GFT constants |
-| 4 | `CC_PHASE_3_LIFECYCLE.md` | 2–2.5 hr | MetaApi sync, auto-close, trade journal, slippage all wired |
-| 5 | `CC_PHASE_4_MODULARIZE.md` | 45 min – 1 hr | Golden parity test passes, zero behavior change |
-| 6 | `CC_PHASE_5_API.md` | 45 min – 1 hr | Config API + shadow exec log ready for UI |
-| 7 | `CC_PHASE_6_PROMOTION.md` | 30–45 min | Canary gft_10k in prod, then expand |
-| 8 | `SPRINT_2_MTF_SPEC.md` | 8–10 days | MTF crypto + forex + equity models shipped |
+| # | Spec | Est time | Risk | Gate to pass |
+|---|---|---|---|---|
+| 1 | `CC_PHASE_0_PARITY_HARNESS.md` | 30–45 min | LOW | QA matches Prod byte-for-byte on full pipeline |
+| 2 | `CC_PHASE_2A_UNIVERSE_RESOLVER.md` | 1.5–2 hr | LOW | Resolved universe works in observe + enforce mode |
+| 3 | `CC_PHASE_2B_JSON_POLICY.md` | 2–2.5 hr | MED | V6 is pure JSON interpreter, no hardcoded GFT constants |
+| 4a | `CC_PHASE_3A_METAAPI_READ.md` | 30–45 min | LOW | MetaApi read works, outage handled safely |
+| 4b | `CC_PHASE_3B_TRADE_JOURNAL.md` | 30–45 min | MED | Journal + slippage wired into execution path |
+| 4c | `CC_PHASE_3C_RECONCILE_DETECT.md` | 30–45 min | LOW | Divergences detected, zero state mutation |
+| 4d | `CC_PHASE_3D_RECONCILE_ACT.md` | 45 min – 1 hr | MED | DB updates reflect broker truth, no broker writes |
+| 4e | `CC_PHASE_3E_LIFECYCLE_DAEMON.md` | 30–45 min | MED | Daemon loop runs 10+ min clean, no auto-close yet |
+| 4f | `CC_PHASE_3F_AUTO_CLOSE.md` | 45 min – 1 hr | **HIGH** | Real broker close works, circuit breaker active |
+| 5 | `CC_PHASE_4_MODULARIZE.md` | 45 min – 1 hr | LOW | Golden parity test passes, zero behavior change |
+| 6 | `CC_PHASE_5_API.md` | 45 min – 1 hr | LOW | Config API + shadow exec log ready for UI |
+| 7 | `CC_PHASE_6_PROMOTION.md` | 30–45 min | HIGH | Canary gft_10k in prod, then expand |
+| 8 | `SPRINT_2_MTF_SPEC.md` | 8–10 days | LOW | MTF crypto + forex + equity models shipped |
 
-**Hard budget:** ~8 hours for phases 0–6. If any phase runs over by > 50%, stop and triage. Phases 4, 5, 6 can slip to tomorrow if needed — 0, 2a, 2b, 3 are the MUST-haves.
+**Phase 3 sliced into 6 parts** (3a → 3f) so each risky piece can be individually verified before the next lands. Total Phase 3 budget unchanged (~3 hrs), but the riskiest piece (3f auto-close) is isolated + gated by 5 prior passes.
+
+**Hard budget:** ~8 hours for phases 0–6. If any phase runs over by > 50%, stop and triage. Phases 4, 5, 6 can slip to tomorrow if needed — 0, 2a, 2b, 3a-3e are the MUST-haves. **3f (auto-close) can defer to Day 2** if stability of 3a-3e isn't rock solid yet.
 
 ---
 
@@ -97,10 +104,13 @@ Priority order (MUST → nice-to-have):
 1. **Phase 0** — MUST. Without parity, building on QA is building on sand.
 2. **Phase 2a** — MUST. Stops universe spam.
 3. **Phase 2b** — MUST. Fixes crypto spread + makes V6 config-driven.
-4. **Phase 3** — MUST. Without lifecycle, automation is half-built.
-5. **Phase 4** — Can slip 1 day. Pure refactor, no new capability.
-6. **Phase 5** — Can slip 1 day. UI prep, not blocking trading.
-7. **Phase 6** — Requires Phase 3 + Phase 5 done. Can happen tomorrow.
+4. **Phase 3a + 3b** — MUST. MetaApi read + trade journal. Foundation for everything lifecycle.
+5. **Phase 3c + 3d** — MUST. Reconciliation. Without this, state can silently drift.
+6. **Phase 3e** — MUST. Daemon. Without this, reconciliation is manual only.
+7. **Phase 3f** — CAN DEFER 1 day. Auto-close is dangerous. Only ship after 3e has run clean for 12+ hours.
+8. **Phase 4** — Can slip 1 day. Pure refactor.
+9. **Phase 5** — Can slip 1 day. UI prep.
+10. **Phase 6** — Requires 3e (minimum) + Phase 5 done. Can happen Day 2.
 
 **Sprint 2 MTF** is a separate week of work, started after Phases 0–6 are in prod.
 

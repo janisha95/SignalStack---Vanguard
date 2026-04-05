@@ -24,6 +24,59 @@ Today the orchestrator polls/analyzes a broad universe, then V6 rejects most of 
 5. The debug endpoint must return machine-readable truth, not a Telegram-style human message.
 
 ---
+Addendum 1 — Symbol Identity Contract
+Paste target: CC_PHASE_2A_UNIVERSE_RESOLVER.md, new section before §2 "What to build"1.5 Symbol identity contractRule: internal canonical symbols are broker-neutral. Broker-specific forms live only at the execution boundary.Canonical form (used everywhere internally):
+
+AAPL, MSFT, TSLA — equity
+EURUSD, GBPUSD, USDJPY — forex (no slash, no suffix)
+BTCUSD, ETHUSD, SOLUSD — crypto (no slash, no suffix)
+Everything downstream of ingest uses canonical form: DB tables (vanguard_bars_*, vanguard_features, vanguard_predictions, vanguard_shortlist, vanguard_tradeable_portfolio, vanguard_trade_journal, vanguard_open_positions), JSON config universes, API payloads, UI, Telegram, logs.Broker symbols are a translation layer, not internal truth.Two required helpers: Vanguard_QAenv/vanguard/helpers/symbol_identity.py (new)pythondef to_canonical(source: str, raw_symbol: str) -> str:
+    """
+    Normalize source-native symbols into canonical internal form.
+    source: 'alpaca' | 'twelve_data' | 'ibkr' | 'metaapi_gft' | 'yfinance'
+    Examples:
+      to_canonical('alpaca', 'AAPL')       -> 'AAPL'
+      to_canonical('twelve_data', 'BTC/USD') -> 'BTCUSD'
+      to_canonical('ibkr', 'EUR/USD')      -> 'EURUSD'
+      to_canonical('metaapi_gft', 'EURUSD.x') -> 'EURUSD'
+    Raises UnknownSymbolFormat on unexpected input — never guesses.
+    """
+
+def to_broker(route: str, canonical: str) -> str:
+    """
+    Translate canonical internal symbol to broker-native form at execution boundary.
+    route: 'metaapi_gft' | 'signalstack_ttp' | 'alpaca_live' (future)
+    Examples:
+      to_broker('metaapi_gft', 'EURUSD') -> 'EURUSD.x'
+      to_broker('metaapi_gft', 'AAPL')   -> 'AAPL.x'
+      to_broker('metaapi_gft', 'BTCUSD') -> 'BTCUSD.x'
+      to_broker('signalstack_ttp', 'AAPL') -> 'AAPL'
+    Raises UnmappedSymbol if canonical symbol has no mapping for that route.
+    """Translation tables driven by config (no hardcoded conversion rules in adapter code):json"execution": {
+  "routes": {
+    "metaapi_gft":   {"suffix_all": ".x"},
+    "signalstack_ttp": {"suffix_all": ""}
+  }
+}Enforcement
+All ingest adapters (alpaca_adapter.py, twelve_data_adapter.py, ibkr_adapter.py, metaapi_client.py read path) call to_canonical() on every symbol at the moment of ingest, before any DB write.
+All execution adapters call to_broker() on every canonical symbol at the moment of submit, right before the broker API call.
+Downstream code (V1–V6, lifecycle daemon, reconciler, API endpoints, UI) never handles source-raw or broker-raw symbols.
+Config universe shapeThe universes.gft_universe.symbols block in vanguard_runtime.json uses canonical form only:json"gft_universe": {
+  "type": "static",
+  "symbols": {
+    "crypto": ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "LTCUSD", "BCHUSD"],
+    "forex":  ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF"],
+    "equity": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", "AMD", "INTC", "CRM", "ORCL", "ADBE", "JPM", "BAC"]
+  }
+}Acceptance tests (add to Phase 2a §3)Test 9 — Canonical form purity in DB
+sqlSELECT DISTINCT symbol FROM vanguard_health WHERE symbol LIKE '%.x%' OR symbol LIKE '%/%';
+Expect: zero rows. No .x suffix or slash anywhere internal.Test 10 — Translation round-trip
+pythonassert to_broker('metaapi_gft', to_canonical('metaapi_gft', 'EURUSD.x')) == 'EURUSD.x'
+assert to_canonical('twelve_data', 'BTC/USD') == 'BTCUSD'
+assert to_broker('metaapi_gft', 'BTCUSD') == 'BTCUSD.x'
+Expect: all assertions pass.Test 11 — Unmapped symbol fails loud
+to_broker('metaapi_gft', 'UNKNOWNCOIN') raises UnmappedSymbol. No silent passthrough.Test 12 — Ingest adapters canonicalize at the door
+After one cycle, grep -r "\.x\|BTC/USD\|EUR/USD" Vanguard_QAenv/vanguard/ --include="*.py" | grep -v symbol_identity.py | grep -v "# " returns zero matches.
 
 ## 2. What to build
 
