@@ -1,8 +1,16 @@
 """
-meridian_adapter.py — Read-only adapter for Meridian shortlist_daily.
+meridian_adapter.py — Read-only adapter for Meridian meridian_shortlist_final.
 
 Reads from ~/SS/Meridian/data/v2_universe.db (READ ONLY).
 Returns normalized candidate rows for the unified API.
+
+Primary table: meridian_shortlist_final (written by meridian_daily_shortlist.py)
+  Schema (confirmed 2026-04-06):
+    id, run_date, ticker, direction, tcn_score, final_score, rank,
+    regime, sector, price, created_at
+
+Enriched by LEFT JOIN to predictions_daily for dual-TCN scores:
+    tcn_long_score, tcn_short_score, lgbm_long_prob, lgbm_short_prob
 
 Location: ~/SS/Vanguard/vanguard/api/adapters/meridian_adapter.py
 """
@@ -39,33 +47,27 @@ def _make_as_of(date_str: str) -> str:
 def _normalize_row(r: sqlite3.Row, date_str: str) -> dict[str, Any]:
     ticker    = (r["ticker"] or "").upper()
     direction = (r["direction"] or "LONG").upper()
-    row_keys = set(r.keys())
-    raw_tcn_long = r["tcn_long_score"] if "tcn_long_score" in row_keys else None
-    raw_tcn_short = r["tcn_short_score"] if "tcn_short_score" in row_keys else None
-    tcn_long = float(raw_tcn_long) if raw_tcn_long is not None else None
-    tcn_short = float(raw_tcn_short) if raw_tcn_short is not None else None
+    row_keys  = set(r.keys())
+
+    # tcn_score is the directional score stored in meridian_shortlist_final
     raw_tcn = r["tcn_score"] if "tcn_score" in row_keys else None
-    if raw_tcn is not None:
-        raw_tcn = float(raw_tcn)
-        if direction == "LONG" and tcn_long is None:
-            tcn_long = raw_tcn
-        if direction == "SHORT" and tcn_short is None:
-            tcn_short = raw_tcn
-    tcn = tcn_long if direction == "LONG" else tcn_short
+    tcn = float(raw_tcn) if raw_tcn is not None else None
     if tcn == 0.5:
         # 0.5 is Meridian's known neutral fallback when TCN cannot build a valid sequence.
         tcn = None
-    fr   = float(r["factor_rank"] or 0.0) if "factor_rank" in row_keys else 0.0
-    lgbm_long = float(r["lgbm_long_prob"] or 0.0) if "lgbm_long_prob" in row_keys and r["lgbm_long_prob"] is not None else None
-    lgbm_short = float(r["lgbm_short_prob"] or 0.0) if "lgbm_short_prob" in row_keys and r["lgbm_short_prob"] is not None else None
-    # No synthetic fallback — lgbm_long_prob and lgbm_short_prob come exclusively from
-    # predictions_daily (written by lgbm_scorer.py stage 4). If NULL, scorer hasn't run yet.
+
+    # Dual-TCN scores from predictions_daily join (may be NULL if scorer hasn't run)
+    raw_tcn_long  = r["tcn_long_score"]  if "tcn_long_score"  in row_keys else None
+    raw_tcn_short = r["tcn_short_score"] if "tcn_short_score" in row_keys else None
+    tcn_long  = float(raw_tcn_long)  if raw_tcn_long  is not None else None
+    tcn_short = float(raw_tcn_short) if raw_tcn_short is not None else None
+
+    lgbm_long  = float(r["lgbm_long_prob"])  if "lgbm_long_prob"  in row_keys and r["lgbm_long_prob"]  is not None else None
+    lgbm_short = float(r["lgbm_short_prob"]) if "lgbm_short_prob" in row_keys and r["lgbm_short_prob"] is not None else None
     predictions_missing = lgbm_long is None and lgbm_short is None
+
+    final_score   = float(r["final_score"] or 0.0) if "final_score" in row_keys else float(tcn or 0.0)
     resolved_price = float(r["resolved_price"]) if r["resolved_price"] is not None else None
-    final_score = float(r["final_score"] or 0.0) if "final_score" in row_keys else float(tcn or 0.0)
-    residual_alpha = float(r["residual_alpha"] or 0.0) if "residual_alpha" in row_keys else 0.0
-    predicted_return = None
-    beta = float(r["beta"] or 0.0) if "beta" in row_keys else 0.0
 
     row: dict[str, Any] = {
         "row_id":  f"meridian:{ticker}:{direction}:{date_str}",
@@ -79,7 +81,7 @@ def _normalize_row(r: sqlite3.Row, date_str: str) -> dict[str, Any]:
         "regime":  (r["regime"] or "").upper(),
         "partial_data": predictions_missing,
         "provenance": {
-            "base":              "shortlist_daily",
+            "base":              "meridian_shortlist_final",
             "predictions_daily": "missing" if predictions_missing else "joined",
             "price_source":      "resolved",
         },
@@ -89,11 +91,7 @@ def _normalize_row(r: sqlite3.Row, date_str: str) -> dict[str, Any]:
         "tcn_short_score": tcn_short,
         # Meridian-native fields (also exposed at top level for uniform filtering)
         "tcn_score":       tcn,
-        "factor_rank":     fr,
         "final_score":     final_score,
-        "residual_alpha":  residual_alpha,
-        "predicted_return": predicted_return,
-        "beta":            beta,
         "rank":            int(r["rank"] or 0),
         "m_lgbm_long_prob":  lgbm_long,
         "m_lgbm_short_prob": lgbm_short,
@@ -102,11 +100,7 @@ def _normalize_row(r: sqlite3.Row, date_str: str) -> dict[str, Any]:
             "tcn_long_score":     tcn_long,
             "tcn_short_score":    tcn_short,
             "tcn_score":          tcn,
-            "factor_rank":        fr,
             "final_score":        final_score,
-            "residual_alpha":     residual_alpha,
-            "predicted_return":   predicted_return,
-            "beta":               beta,
             "rank":               int(r["rank"] or 0),
             "m_lgbm_long_prob":   lgbm_long,
             "m_lgbm_short_prob":  lgbm_short,
@@ -120,11 +114,11 @@ def get_candidates(
     direction: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Load all shortlist_daily rows for the given date (default: latest date).
+    Load all meridian_shortlist_final rows for the given date (default: latest date).
 
     Parameters
     ----------
-    trade_date : YYYY-MM-DD string. If None, uses MAX(date).
+    trade_date : YYYY-MM-DD string. If None, uses MAX(run_date).
     direction  : "LONG", "SHORT", or None (all).
 
     Returns
@@ -141,90 +135,47 @@ def get_candidates(
         try:
             if trade_date is None:
                 row = con.execute(
-                    "SELECT MAX(date) AS d FROM shortlist_daily"
+                    "SELECT MAX(run_date) AS d FROM meridian_shortlist_final"
                 ).fetchone()
                 trade_date = row["d"] if row and row["d"] else str(date_type.today())
 
-            query_new = """
-                SELECT s.date,
-                       s.ticker,
-                       s.direction,
-                       s.predicted_return,
-                       s.beta,
-                       s.market_component,
-                       s.residual_alpha,
-                       s.rank,
-                       s.regime,
-                       s.sector,
+            query = """
+                SELECT f.run_date,
+                       f.ticker,
+                       f.direction,
+                       f.rank,
+                       f.regime,
+                       f.sector,
+                       f.final_score,
+                       f.tcn_score,
                        COALESCE(
-                           s.price,
-                           p.price,
+                           f.price,
                            (
                                SELECT db.close
                                FROM daily_bars db
-                               WHERE db.ticker = s.ticker
+                               WHERE db.ticker = f.ticker
                                  AND db.close IS NOT NULL
-                                 AND db.date <= s.date
+                                 AND db.date <= f.run_date
                                ORDER BY db.date DESC
                                LIMIT 1
                            )
                        ) AS resolved_price,
-                       s.tcn_long_score,
-                       s.tcn_short_score,
-                       s.final_score,
+                       p.tcn_long_score,
+                       p.tcn_short_score,
                        p.lgbm_long_prob,
                        p.lgbm_short_prob
-                FROM shortlist_daily s
+                FROM meridian_shortlist_final f
                 LEFT JOIN predictions_daily p
-                  ON p.date = s.date AND p.ticker = s.ticker
-                WHERE s.date = ?
-            """
-            query_old = """
-                SELECT s.date,
-                       s.ticker,
-                       s.direction,
-                       s.predicted_return,
-                       s.beta,
-                       s.market_component,
-                       s.residual_alpha,
-                       s.rank,
-                       s.regime,
-                       s.sector,
-                       COALESCE(
-                           s.price,
-                           p.price,
-                           (
-                               SELECT db.close
-                               FROM daily_bars db
-                               WHERE db.ticker = s.ticker
-                                 AND db.close IS NOT NULL
-                                 AND db.date <= s.date
-                               ORDER BY db.date DESC
-                               LIMIT 1
-                           )
-                       ) AS resolved_price,
-                       s.tcn_score,
-                       s.factor_rank,
-                       s.final_score,
-                       p.lgbm_long_prob,
-                       p.lgbm_short_prob
-                FROM shortlist_daily s
-                LEFT JOIN predictions_daily p
-                  ON p.date = s.date AND p.ticker = s.ticker
-                WHERE s.date = ?
+                  ON p.date = f.run_date AND p.ticker = f.ticker
+                WHERE f.run_date = ?
             """
             params: list[Any] = [trade_date]
             if direction and direction.upper() in ("LONG", "SHORT"):
-                query_new += " AND UPPER(direction) = ?"
-                query_old += " AND UPPER(direction) = ?"
+                query += " AND UPPER(f.direction) = ?"
                 params.append(direction.upper())
-            query_new += " ORDER BY final_score DESC"
-            query_old += " ORDER BY final_score DESC"
+            query += " ORDER BY f.final_score DESC"
 
-            try:
-                rows = con.execute(query_new, params).fetchall()
-            except sqlite3.Error:
-                rows = con.execute(query_old, params).fetchall()
+            rows = con.execute(query, params).fetchall()
         finally:
             con.close()
     except Exception as exc:
@@ -237,14 +188,14 @@ def get_candidates(
 
 
 def get_latest_date() -> str | None:
-    """Return the most recent date present in shortlist_daily, or None."""
+    """Return the most recent run_date in meridian_shortlist_final, or None."""
     if not MERIDIAN_DB.exists():
         return None
     try:
         con = sqlite3.connect(f"file:{MERIDIAN_DB}?mode=ro", uri=True)
         try:
             row = con.execute(
-                "SELECT MAX(date) AS d FROM shortlist_daily"
+                "SELECT MAX(run_date) AS d FROM meridian_shortlist_final"
             ).fetchone()
             return row[0] if row and row[0] else None
         finally:

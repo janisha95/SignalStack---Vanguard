@@ -1,21 +1,21 @@
 {
   "equity": {
-    "tp_mult": 2.0,
-    "sl_mult": 1.0,
-    "horizon_bars": 6,
+    "tp_mult": 2.5,
+    "sl_mult": 1.25,
+    "horizon_bars": 12,
     "rr_ratio": 2.0,
     "session_end": "16:00",
     "session_tz": "America/New_York",
-    "version": "tbm_equity_atr_v1"
+    "version": "tbm_equity_atr_v2"
   },
   "forex": {
-    "tp_mult": 2.0,
-    "sl_mult": 1.0,
+    "tp_mult": 2.5,
+    "sl_mult": 1.25,
     "horizon_bars": 12,
     "rr_ratio": 2.0,
     "session_end": "17:00",
     "session_tz": "America/New_York",
-    "version": "tbm_forex_atr_v1"
+    "version": "tbm_forex_atr_v2"
   },
   "commodity": {
     "tp_mult": 2.0,
@@ -34,6 +34,24 @@
     "session_end": null,
     "session_tz": "UTC",
     "version": "tbm_crypto_atr_v1"
+  },
+  "metal": {
+    "tp_mult": 2.5,
+    "sl_mult": 1.25,
+    "horizon_bars": 12,
+    "rr_ratio": 2.0,
+    "session_end": "17:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_metal_atr_v1"
+  },
+  "energy": {
+    "tp_mult": 2.5,
+    "sl_mult": 1.25,
+    "horizon_bars": 12,
+    "rr_ratio": 2.0,
+    "session_end": "17:00",
+    "session_tz": "America/New_York",
+    "version": "tbm_energy_atr_v1"
   },
   "index": {
     "tp_mult": 2.0,

@@ -534,6 +534,15 @@ class AlpacaWSAdapter:
         self.connect_attempts: int     = 0
         self.last_error:    str | None = None
 
+        # Single persistent DB connection reused for ALL bar writes.
+        # sqlite3.connect() used as a context manager only manages transactions,
+        # not connection lifetime — opening one per write leaks file descriptors.
+        self._db_con: sqlite3.Connection | None = None
+        self._bars_since_checkpoint: int = 0
+        _CHECKPOINT_EVERY = 500  # WAL checkpoint after this many bars written
+
+        self._checkpoint_interval = _CHECKPOINT_EVERY
+
         # Ensure vanguard_bars_1m table exists on init (sync, one-time)
         self._ensure_1m_table()
 
@@ -541,31 +550,55 @@ class AlpacaWSAdapter:
     # Schema
     # ------------------------------------------------------------------
 
+    def _get_db_con(self) -> sqlite3.Connection:
+        """
+        Return the persistent DB connection, opening it if not yet open.
+
+        Reusing one connection for all writes eliminates the FD leak caused by
+        opening sqlite3.connect() on every _write_bars() call.
+        """
+        if self._db_con is None:
+            self._db_con = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+            self._db_con.execute("PRAGMA journal_mode=WAL;")
+            self._db_con.execute("PRAGMA synchronous=NORMAL;")
+            self._db_con.execute("PRAGMA busy_timeout=30000;")
+            logger.debug("[alpaca_ws] Opened persistent DB connection")
+        return self._db_con
+
+    def _checkpoint_wal(self) -> None:
+        """Run WAL checkpoint to prevent unbounded WAL growth."""
+        try:
+            if self._db_con is not None:
+                self._db_con.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                self._db_con.commit()
+                logger.debug("[alpaca_ws] WAL checkpoint done")
+        except Exception as exc:
+            logger.warning("[alpaca_ws] WAL checkpoint failed: %s", exc)
+
     def _ensure_1m_table(self) -> None:
         """Create vanguard_bars_1m if it doesn't exist."""
-        import sqlite3 as _sqlite3
-        with _sqlite3.connect(self.db_path) as con:
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_bars_1m (
-                    symbol       TEXT    NOT NULL,
-                    bar_ts_utc   TEXT    NOT NULL,
-                    open         REAL,
-                    high         REAL,
-                    low          REAL,
-                    close        REAL,
-                    volume       INTEGER,
-                    tick_volume  INTEGER DEFAULT 0,
-                    asset_class  TEXT    DEFAULT 'equity',
-                    data_source  TEXT    DEFAULT 'alpaca_ws',
-                    ingest_ts_utc TEXT,
-                    PRIMARY KEY (symbol, bar_ts_utc)
-                )
-            """)
-            con.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_ts
-                    ON vanguard_bars_1m(bar_ts_utc)
-            """)
-            con.commit()
+        con = self._get_db_con()
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS vanguard_bars_1m (
+                symbol       TEXT    NOT NULL,
+                bar_ts_utc   TEXT    NOT NULL,
+                open         REAL,
+                high         REAL,
+                low          REAL,
+                close        REAL,
+                volume       INTEGER,
+                tick_volume  INTEGER DEFAULT 0,
+                asset_class  TEXT    DEFAULT 'equity',
+                data_source  TEXT    DEFAULT 'alpaca_ws',
+                ingest_ts_utc TEXT,
+                PRIMARY KEY (symbol, bar_ts_utc)
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_ts
+                ON vanguard_bars_1m(bar_ts_utc)
+        """)
+        con.commit()
 
     # ------------------------------------------------------------------
     # Async start/stop (implements BaseDataAdapter interface)
@@ -664,9 +697,18 @@ class AlpacaWSAdapter:
         logger.info("[alpaca_ws] Stopped")
 
     async def stop(self) -> None:
-        """Signal the receive loop to exit cleanly."""
+        """Signal the receive loop to exit cleanly, then flush and close DB."""
         self.running = False
         logger.info("[alpaca_ws] Stop requested")
+        self._checkpoint_wal()
+        if self._db_con is not None:
+            try:
+                self._db_con.close()
+                logger.debug("[alpaca_ws] DB connection closed")
+            except Exception as exc:
+                logger.warning("[alpaca_ws] DB close error: %s", exc)
+            finally:
+                self._db_con = None
 
     # ------------------------------------------------------------------
     # DB write
@@ -674,7 +716,12 @@ class AlpacaWSAdapter:
 
     def _write_bars(self, bars: list[dict]) -> None:
         """
-        Write Alpaca 1m bars to vanguard_bars_1m.
+        Write Alpaca 1m bars to vanguard_bars_1m using the persistent connection.
+
+        Fix (BUG 19): reuse self._db_con for all writes instead of opening a new
+        sqlite3.connect() per call. The context-manager form of sqlite3.connect()
+        only manages transactions — it does NOT close the connection, so every call
+        leaked one file descriptor, driving open_fds from 60 → 194+ in minutes.
 
         Alpaca WS bar keys:
             S — symbol
@@ -684,7 +731,6 @@ class AlpacaWSAdapter:
             n — trade count (tick_volume proxy)
         Vanguard convention: store bar END time = t + 1 minute.
         """
-        import sqlite3 as _sqlite3
         from datetime import timedelta as _td
 
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -708,21 +754,35 @@ class AlpacaWSAdapter:
             return
 
         try:
-            with _sqlite3.connect(self.db_path) as con:
-                con.executemany(
-                    """
-                    INSERT OR REPLACE INTO vanguard_bars_1m
-                        (symbol, bar_ts_utc, open, high, low, close, volume,
-                         tick_volume, asset_class, data_source, ingest_ts_utc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'equity', 'alpaca_ws', ?)
-                    """,
-                    rows,
-                )
-                con.commit()
+            con = self._get_db_con()
+            con.executemany(
+                """
+                INSERT OR REPLACE INTO vanguard_bars_1m
+                    (symbol, bar_ts_utc, open, high, low, close, volume,
+                     tick_volume, asset_class, data_source, ingest_ts_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'equity', 'alpaca_ws', ?)
+                """,
+                rows,
+            )
+            con.commit()
             self.bars_received += len(rows)
+            self._bars_since_checkpoint += len(rows)
             logger.debug("[alpaca_ws] Wrote %d bars", len(rows))
+
+            # Periodic WAL checkpoint to prevent unbounded WAL growth
+            if self._bars_since_checkpoint >= self._checkpoint_interval:
+                self._checkpoint_wal()
+                self._bars_since_checkpoint = 0
+
         except Exception as exc:
             logger.error("[alpaca_ws] DB write failed: %s", exc)
+            # Attempt to reset the connection on error so next write gets a fresh one
+            if self._db_con is not None:
+                try:
+                    self._db_con.close()
+                except Exception:
+                    pass
+                self._db_con = None
 
     # ------------------------------------------------------------------
     # Status

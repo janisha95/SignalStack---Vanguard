@@ -17,7 +17,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,9 +26,9 @@ from fastapi.testclient import TestClient
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path) -> Path:
-    """Return path to a temporary SQLite database."""
-    return tmp_path / "test_vanguard.db"
+def tmp_db(tmp_path: Path) -> str:
+    """Return a Vanguard-safe temp SQLite path that passes DB isolation checks."""
+    return str(tmp_path / "test_vanguard_universe.db")
 
 
 @pytest.fixture()
@@ -620,7 +620,22 @@ def api_client(tmp_db, meridian_db, s1_db_and_conv):
          patch.object(reports,           "VANGUARD_DB", tmp_db), \
          patch.object(meridian_adapter,  "MERIDIAN_DB", meridian_db), \
          patch.object(s1_adapter,        "S1_DB",       db_path), \
-         patch.object(s1_adapter,        "S1_CONV_DIR", conv_dir):
+         patch.object(s1_adapter,        "S1_CONV_DIR", conv_dir), \
+         patch.object(unified_api, "_fetch_risky_health", new=AsyncMock(return_value={
+             "reachable": True,
+             "config_version": "test-risky-config",
+             "checks_enabled": 6,
+             "mode": "check_only",
+             "raw": {"status": "ok"},
+         })), \
+         patch.object(unified_api, "_check_trades_with_risky", new=AsyncMock(return_value=[{
+             "approved": True,
+             "severity": "pass",
+             "reasons": [],
+             "computed": {},
+             "config_version": "test-risky-config",
+             "checked_at": "2026-04-08T00:00:00Z",
+         }])):
         # Startup event fires once per app instance; explicitly init tables
         # so every test gets a clean, fully-initialized tmp_db regardless of
         # whether the startup event has already fired in a prior test.
@@ -628,8 +643,8 @@ def api_client(tmp_db, meridian_db, s1_db_and_conv):
         userviews.seed_system_views()
         trade_desk.init_table()
         reports.init_table()
-        client = TestClient(unified_api.app)
-        yield client
+        with TestClient(unified_api.app) as client:
+            yield client
 
 
 class TestHealthEndpoint:
@@ -647,6 +662,174 @@ class TestHealthEndpoint:
         data = api_client.get("/api/v1/health").json()
         assert "available" in data["sources"]["meridian"]
         assert "available" in data["sources"]["s1"]
+
+
+class TestRiskyIntegration:
+    def test_system_status_includes_risky_block(self, api_client):
+        from vanguard.api import unified_api
+
+        risky_status = {
+            "reachable": True,
+            "config_version": "cfg-123",
+            "checks_enabled": 6,
+            "mode": "check_only",
+        }
+        with patch.object(
+            unified_api,
+            "_get_risky_status_snapshot",
+            new=AsyncMock(return_value=risky_status),
+        ):
+            resp = api_client.get("/api/v1/system/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["risky"] == risky_status
+
+    def test_risk_health_proxy_returns_risky_payload(self, api_client):
+        from vanguard.api import unified_api
+        import httpx
+
+        risky_payload = {"status": "ok", "config_version": "cfg-123"}
+        response = httpx.Response(
+            200,
+            json=risky_payload,
+            request=httpx.Request("GET", "http://127.0.0.1:8092/risk/health"),
+        )
+        with patch.object(
+            unified_api,
+            "_request_risky",
+            new=AsyncMock(return_value=response),
+        ):
+            resp = api_client.get("/api/v1/risk/health")
+
+        assert resp.status_code == 200
+        assert resp.json() == risky_payload
+
+    def test_execute_attaches_risky_verdict(self, api_client):
+        from vanguard.api import unified_api, trade_desk
+
+        risky_verdict = {
+            "approved": True,
+            "severity": "warn",
+            "reasons": [{"check": "spread_sanity", "status": "warn", "message": "wide", "override_allowed": False}],
+            "computed": {},
+            "config_version": "cfg-123",
+            "checked_at": "2026-04-08T02:00:00Z",
+        }
+        execution_result = {
+            "approved": [],
+            "rejected": [],
+            "summary": {"submitted": 1},
+            "submitted": 1,
+            "failed": 0,
+            "results": [{"id": 7, "symbol": "EURUSD", "status": "FORWARD_TRACKED"}],
+        }
+        with patch.object(
+            unified_api,
+            "_check_trades_with_risky",
+            new=AsyncMock(return_value=[risky_verdict]),
+        ), patch.object(
+            trade_desk,
+            "execute_trades",
+            return_value=execution_result,
+        ) as execute_mock:
+            resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ftmo_100k",
+                "trades": [
+                    {"symbol": "EURUSD", "direction": "LONG", "shares": 1, "tier": "manual"}
+                ],
+            })
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["risky_verdict"]["config_version"] == "cfg-123"
+        assert payload["risky_verdict"]["severity"] == "warn"
+        execute_mock.assert_called_once()
+
+    def test_execute_rejects_when_risky_blocks(self, api_client):
+        from vanguard.api import unified_api, trade_desk
+        from fastapi.responses import JSONResponse
+
+        block_verdict = {
+            "approved": False,
+            "severity": "block",
+            "reasons": [{"check": "spread_sanity", "status": "block", "message": "blocked", "override_allowed": False}],
+            "computed": {},
+            "config_version": "cfg-block",
+            "checked_at": "2026-04-08T02:00:00Z",
+        }
+        rejection = JSONResponse(
+            status_code=422,
+            content={"status": "rejected_by_risky", "verdict": block_verdict},
+        )
+        with patch.object(
+            unified_api,
+            "_check_trades_with_risky",
+            new=AsyncMock(return_value=rejection),
+        ), patch.object(trade_desk, "execute_trades") as execute_mock:
+            resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ftmo_100k",
+                "trades": [
+                    {"symbol": "EURUSD", "direction": "LONG", "shares": 1, "tier": "manual"}
+                ],
+            })
+
+        assert resp.status_code == 422
+        assert resp.json()["status"] == "rejected_by_risky"
+        execute_mock.assert_not_called()
+
+    def test_execute_returns_503_when_risky_required_and_unreachable(self, api_client):
+        from vanguard.api import unified_api, trade_desk
+        from fastapi.responses import JSONResponse
+
+        unreachable = JSONResponse(
+            status_code=503,
+            content={"error": "risky_unreachable", "message": "connect failed"},
+        )
+        with patch.object(
+            unified_api,
+            "_check_trades_with_risky",
+            new=AsyncMock(return_value=unreachable),
+        ), patch.object(trade_desk, "execute_trades") as execute_mock:
+            resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ftmo_100k",
+                "trades": [
+                    {"symbol": "EURUSD", "direction": "LONG", "shares": 1, "tier": "manual"}
+                ],
+            })
+
+        assert resp.status_code == 503
+        assert resp.json()["error"] == "risky_unreachable"
+        execute_mock.assert_not_called()
+
+    def test_execute_proceeds_when_risky_optional(self, api_client):
+        from vanguard.api import unified_api, trade_desk
+
+        execution_result = {
+            "approved": [],
+            "rejected": [],
+            "summary": {"submitted": 1},
+            "submitted": 1,
+            "failed": 0,
+            "results": [{"id": 9, "symbol": "EURUSD", "status": "FORWARD_TRACKED"}],
+        }
+        with patch.dict(os.environ, {"RISKY_REQUIRED": "false"}), patch.object(
+            unified_api,
+            "_check_trades_with_risky",
+            new=AsyncMock(return_value=[]),
+        ), patch.object(
+            trade_desk,
+            "execute_trades",
+            return_value=execution_result,
+        ):
+            resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ftmo_100k",
+                "trades": [
+                    {"symbol": "EURUSD", "direction": "LONG", "shares": 1, "tier": "manual"}
+                ],
+            })
+
+        assert resp.status_code == 200
+        assert resp.json()["risky_verdict"] is None
 
 
 class TestFieldRegistryEndpoint:
@@ -803,6 +986,7 @@ class TestExecuteEndpoint:
         from vanguard.api import trade_desk
         with patch.object(trade_desk, "_get_webhook_url", return_value=""):
             resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ttp_20k_swing",
                 "trades": [
                     {"symbol": "AAPL", "direction": "LONG", "shares": 100, "tier": "tier_dual"}
                 ]
@@ -1008,6 +1192,7 @@ class TestExecutionForwardTrackingEndpoints:
         from vanguard.api import trade_desk
         with patch.object(trade_desk, "_get_webhook_url", return_value=""):
             exec_resp = api_client.post("/api/v1/execute", json={
+                "profile_id": "ttp_20k_swing",
                 "trades": [{"symbol": "AAPL", "direction": "LONG", "shares": 100,
                             "tier": "tier_meridian_long", "tags": ["tcn"]}]
             })
@@ -1046,6 +1231,7 @@ class TestExecutionForwardTrackingEndpoints:
         from vanguard.api import trade_desk
         with patch.object(trade_desk, "_get_webhook_url", return_value=""):
             r = api_client.post("/api/v1/execute", json={
+                "profile_id": "ttp_20k_swing",
                 "trades": [{"symbol": "MSFT", "direction": "LONG", "shares": 100, "tier": "t"}]
             })
         row_id = r.json()["results"][0]["id"]

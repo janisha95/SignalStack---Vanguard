@@ -1,0 +1,23 @@
+{
+  "schema_version": "forex_pair_state_v1",
+  "spread_baseline_path": "/Users/sjani008/SS/Risky/data/spread_baselines.json",
+  "session_order": ["overlap", "london", "ny", "asian", "after_ny"],
+  "sessions_utc": {
+    "asian": {"start": "00:00", "end": "07:00", "liquidity_bucket": "LOW"},
+    "london": {"start": "07:00", "end": "12:00", "liquidity_bucket": "HIGH"},
+    "overlap": {"start": "12:00", "end": "16:00", "liquidity_bucket": "HIGH"},
+    "ny": {"start": "16:00", "end": "21:00", "liquidity_bucket": "MEDIUM"},
+    "after_ny": {"start": "21:00", "end": "24:00", "liquidity_bucket": "LOW"}
+  },
+  "liquidity_overrides": {
+    "JPY_IN_ASIAN": "MEDIUM",
+    "CROSS_IN_ASIAN": "LOW"
+  },
+  "correlation_buckets": {
+    "USD_MAJOR": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF", "USDJPY"],
+    "JPY_CROSS": ["AUDJPY", "CADJPY", "CHFJPY", "EURJPY", "GBPJPY"],
+    "EURO_CROSS": ["EURAUD", "EURCAD", "EURCHF", "EURGBP", "EURNZD"],
+    "STERLING_CROSS": ["GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD"],
+    "AUD_NZD_CAD_CROSS": ["AUDCAD", "AUDCHF", "AUDNZD", "NZDCAD", "NZDCHF", "NZDUSD"]
+  }
+}

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from pathlib import Path
 from typing import Any
+
+from vanguard.config.runtime_config import get_profiles_config, get_shadow_db_path
+from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
-VANGUARD_ROOT = Path(__file__).resolve().parent.parent.parent
-VANGUARD_DB   = VANGUARD_ROOT / "data" / "vanguard_universe.db"
+VANGUARD_DB = get_shadow_db_path()
 
 CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS account_profiles (
@@ -47,6 +48,26 @@ _NEW_COLUMNS: list[tuple[str, str]] = [
     ("webhook_url", "TEXT"),
     ("webhook_api_key", "TEXT"),
     ("execution_bridge", "TEXT DEFAULT 'signalstack'"),
+    ("risk_per_trade_pct", "REAL DEFAULT 0.005"),
+    ("weekly_loss_limit", "REAL"),
+    ("volume_limit", "INTEGER"),
+    ("no_new_positions_after", "TEXT"),
+    ("eod_flatten_time", "TEXT"),
+    ("consistency_rule_pct", "REAL"),
+    ("max_correlation", "REAL DEFAULT 0.85"),
+    ("max_portfolio_heat_pct", "REAL DEFAULT 0.04"),
+    ("block_earnings_overnight", "INTEGER DEFAULT 0"),
+    ("block_halted", "INTEGER DEFAULT 1"),
+    ("stop_atr_multiple", "REAL DEFAULT 1.5"),
+    ("tp_atr_multiple", "REAL DEFAULT 3.0"),
+    ("min_trade_duration_sec", "INTEGER DEFAULT 0"),
+    ("min_trade_range_cents", "REAL DEFAULT 0.0"),
+    ("max_trades_per_day", "INTEGER DEFAULT 999"),
+    ("scaling_profit_trigger_pct", "REAL DEFAULT 0.0"),
+    ("scaling_bp_increase_pct", "REAL DEFAULT 0.0"),
+    ("scaling_pause_increase_pct", "REAL DEFAULT 0.0"),
+    ("instruments", "TEXT"),
+    ("plan_type", "TEXT"),
 ]
 
 SEED_PROFILES: list[dict[str, Any]] = [
@@ -96,13 +117,74 @@ SEED_PROFILES: list[dict[str, Any]] = [
 
 
 def _get_conn() -> sqlite3.Connection:
-    con = sqlite3.connect(str(VANGUARD_DB))
-    con.row_factory = sqlite3.Row
-    return con
+    return sqlite_conn(VANGUARD_DB)
+
+
+def _default_profile_name(profile_id: str) -> str:
+    return " ".join(
+        part.upper() if part.isalpha() and len(part) <= 5 else part.capitalize()
+        for part in profile_id.split("_")
+    )
+
+
+def _infer_prop_firm(profile_id: str, profile: dict[str, Any]) -> str:
+    if profile.get("prop_firm"):
+        return str(profile["prop_firm"])
+    return str(profile_id.split("_", 1)[0] or "unknown")
+
+
+def _infer_account_type(profile_id: str, profile: dict[str, Any]) -> str:
+    if profile.get("account_type"):
+        return str(profile["account_type"])
+    if profile.get("holding_style"):
+        return str(profile["holding_style"])
+    lowered = profile_id.lower()
+    if "challenge" in lowered:
+        return "challenge"
+    if "swing" in lowered:
+        return "swing"
+    return "intraday"
+
+
+def _complete_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    profile_id = str(profile.get("id") or "").strip()
+    if not profile_id:
+        raise ValueError("profile id is required")
+
+    base = next((dict(seed) for seed in SEED_PROFILES if seed.get("id") == profile_id), {})
+    merged = {**base, **dict(profile)}
+    account_size = int(merged.get("account_size") or base.get("account_size") or 0)
+
+    merged["id"] = profile_id
+    merged["name"] = str(merged.get("name") or base.get("name") or _default_profile_name(profile_id))
+    merged["prop_firm"] = _infer_prop_firm(profile_id, merged)
+    merged["account_type"] = _infer_account_type(profile_id, merged)
+    merged["account_size"] = account_size
+    merged["daily_loss_limit"] = float(
+        merged.get("daily_loss_limit")
+        or base.get("daily_loss_limit")
+        or round(account_size * 0.05, 2)
+    )
+    merged["max_drawdown"] = float(
+        merged.get("max_drawdown")
+        or base.get("max_drawdown")
+        or round(account_size * 0.10, 2)
+    )
+    merged["max_positions"] = int(merged.get("max_positions") or base.get("max_positions") or 3)
+    merged["must_close_eod"] = int(merged.get("must_close_eod", base.get("must_close_eod", 0)) or 0)
+    merged["is_active"] = int(merged.get("is_active", base.get("is_active", 1)) or 0)
+    return merged
+
+
+def _seed_profiles() -> list[dict[str, Any]]:
+    profiles = get_profiles_config()
+    if not profiles:
+        return [dict(p) for p in SEED_PROFILES]
+    return [_complete_profile(profile) for profile in profiles]
 
 
 def init_table() -> None:
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         con.execute(CREATE_TABLE)
         existing = {row[1] for row in con.execute("PRAGMA table_info(account_profiles)").fetchall()}
         for col_name, col_type in _NEW_COLUMNS:
@@ -114,64 +196,48 @@ def init_table() -> None:
 def seed_profiles() -> None:
     """Insert seed profiles if they don't already exist (idempotent)."""
     init_table()
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
+        table_cols = {
+            row[1]
+            for row in con.execute("PRAGMA table_info(account_profiles)").fetchall()
+            if row[1] != "created_at"
+        }
         existing = {r[0] for r in con.execute("SELECT id FROM account_profiles").fetchall()}
-        for p in SEED_PROFILES:
+        for p in _seed_profiles():
+            profile_data = {
+                key: value
+                for key, value in dict(p).items()
+                if key in table_cols
+            }
+            if "must_close_eod" in table_cols:
+                profile_data["must_close_eod"] = int(p.get("must_close_eod", 0) or 0)
+            if "is_active" in table_cols:
+                profile_data["is_active"] = int(p.get("is_active", 1) or 0)
             if p["id"] not in existing:
+                cols = list(profile_data.keys())
+                placeholders = ", ".join("?" for _ in cols)
                 con.execute(
-                    """INSERT INTO account_profiles
-                       (id, name, prop_firm, account_type, account_size,
-                        daily_loss_limit, max_drawdown, max_positions, must_close_eod,
-                        max_single_position_pct, max_batch_exposure_pct, dll_headroom_pct,
-                        dd_headroom_pct, max_per_sector, block_duplicate_symbols,
-                        environment, instrument_scope, holding_style, webhook_url, webhook_api_key, execution_bridge)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p["id"], p["name"], p["prop_firm"], p["account_type"],
-                     p["account_size"], p["daily_loss_limit"], p["max_drawdown"],
-                     p["max_positions"], p["must_close_eod"],
-                     p["max_single_position_pct"], p["max_batch_exposure_pct"], p["dll_headroom_pct"],
-                     p["dd_headroom_pct"], p["max_per_sector"], p["block_duplicate_symbols"],
-                     p["environment"], p["instrument_scope"], p["holding_style"],
-                     p["webhook_url"], p["webhook_api_key"], p["execution_bridge"]),
+                    f"""INSERT INTO account_profiles
+                       ({", ".join(cols)})
+                       VALUES ({placeholders})""",
+                    [profile_data[col] for col in cols],
                 )
             else:
+                update_cols = [col for col in profile_data.keys() if col != "id"]
+                if not update_cols:
+                    continue
                 con.execute(
-                    """UPDATE account_profiles
-                       SET max_single_position_pct = ?,
-                           max_batch_exposure_pct = ?,
-                           dll_headroom_pct = ?,
-                           dd_headroom_pct = ?,
-                           max_per_sector = ?,
-                           block_duplicate_symbols = ?,
-                           environment = ?,
-                           instrument_scope = ?,
-                           holding_style = ?,
-                           webhook_url = ?,
-                           webhook_api_key = ?,
-                           execution_bridge = ?
+                    f"""UPDATE account_profiles
+                       SET {", ".join(f"{col} = ?" for col in update_cols)}
                        WHERE id = ?""",
-                    (
-                        p["max_single_position_pct"],
-                        p["max_batch_exposure_pct"],
-                        p["dll_headroom_pct"],
-                        p["dd_headroom_pct"],
-                        p["max_per_sector"],
-                        p["block_duplicate_symbols"],
-                        p["environment"],
-                        p["instrument_scope"],
-                        p["holding_style"],
-                        p["webhook_url"],
-                        p["webhook_api_key"],
-                        p["execution_bridge"],
-                        p["id"],
-                    ),
+                    [profile_data[col] for col in update_cols] + [p["id"]],
                 )
         con.commit()
     logger.info("Account profiles seeded")
 
 
 def list_profiles() -> list[dict[str, Any]]:
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         rows = con.execute(
             "SELECT * FROM account_profiles WHERE is_active = 1 ORDER BY account_size ASC"
         ).fetchall()
@@ -179,7 +245,7 @@ def list_profiles() -> list[dict[str, Any]]:
 
 
 def get_profile(profile_id: str) -> dict[str, Any] | None:
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         row = con.execute(
             "SELECT * FROM account_profiles WHERE id = ?", (profile_id,)
         ).fetchone()
@@ -187,7 +253,7 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
 
 
 def create_profile(data: dict[str, Any]) -> dict[str, Any]:
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         con.execute(
             """INSERT INTO account_profiles
                (id, name, prop_firm, account_type, account_size,
@@ -229,7 +295,7 @@ def update_profile(profile_id: str, data: dict[str, Any]) -> dict[str, Any] | No
     if not updates:
         return get_profile(profile_id)
     set_clause = ", ".join(f"{k} = ?" for k in updates)
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         con.execute(
             f"UPDATE account_profiles SET {set_clause} WHERE id = ?",
             [*updates.values(), profile_id],
@@ -240,7 +306,7 @@ def update_profile(profile_id: str, data: dict[str, Any]) -> dict[str, Any] | No
 
 
 def delete_profile(profile_id: str) -> bool:
-    with _get_conn() as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         cur = con.execute("DELETE FROM account_profiles WHERE id = ?", (profile_id,))
         con.commit()
     return cur.rowcount > 0

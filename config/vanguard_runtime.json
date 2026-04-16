@@ -1,0 +1,1309 @@
+{
+  "config_version": "2026.04.06.5",
+  "runtime": {
+    "environment": "prod",
+    "execution_mode": "manual",
+    "resolved_universe_mode": "enforce",
+    "cycle_interval_seconds": 300,
+    "single_cycle_default": false,
+    "replay_from_source_db": false,
+    "force_assets": [],
+    "context_refresh_before_v6": {
+      "enabled": true,
+      "subscribe_sleep_sec": 0.35,
+      "coverage_report_dir": "/tmp/vanguard_context_refresh"
+    },
+    "context_state_diagnostics": {
+      "enabled": true,
+      "forex_fresh_seconds": 180,
+      "crypto_fresh_seconds": 120
+    },
+    "shortlist_top_n_per_asset_class": 30,
+    "shortlist_display_top_n": 30
+  },
+  "v5": {
+    "selection_engine": "tradeability_v1",
+    "mirror_shortlist": true,
+    "fallback_engine": "simple_legacy",
+    "note": "tradeability_v1 runs V5.1 economics then V5.2 selection; simple_legacy remains rollback."
+  },
+  "database": {
+    "source_db_path": "/Users/sjani008/SS/Vanguard/data/vanguard_universe.db",
+    "shadow_db_path": "/Users/sjani008/SS/Vanguard/data/vanguard_universe.db",
+    "readonly_passthrough_tables": [
+      "vanguard_bars_1m",
+      "vanguard_bars_5m",
+      "vanguard_bars_1h",
+      "vanguard_universe_members",
+      "vanguard_training_data"
+    ]
+  },
+  "profiles": [
+    {
+      "id": "gft_10k",
+      "risk_profile_id": "gft_10k",
+      "policy_id": "gft_10k_v1",
+      "account_size": 10000,
+      "is_active": true,
+      "instrument_scope": "gft_forex_universe",
+      "environment": "prod",
+      "execution_mode": "manual",
+      "execution_bridge": "mt5_local_gft_10k",
+      "live_allowed_asset_classes": [
+        "forex"
+      ],
+      "context_source_id": "gft_mt5_local",
+      "context_health_mode": "auto"
+    },
+    {
+      "id": "gft_5k",
+      "risk_profile_id": "gft_5k",
+      "policy_id": "gft_standard_v1",
+      "account_size": 5000,
+      "is_active": false,
+      "instrument_scope": "gft_universe",
+      "environment": "prod",
+      "execution_mode": "manual",
+      "execution_bridge": "metaapi_gft_5k",
+      "context_source_id": "gft_mt5_local",
+      "context_health_mode": "auto"
+    },
+    {
+      "id": "ftmo_demo_100k",
+      "prop_firm": "ftmo",
+      "risk_profile_id": "ftmo_demo_100k",
+      "policy_id": "ftmo_demo_100k",
+      "account_size": 100000,
+      "is_active": false,
+      "instrument_scope": "ftmo_forex_universe",
+      "environment": "prod",
+      "execution_mode": "auto",
+      "execution_bridge": "mt5_local_ftmo_demo_100k",
+      "live_allowed_asset_classes": [
+        "forex"
+      ],
+      "context_source_id": "ftmo_mt5_local",
+      "context_health_mode": "auto",
+      "onboarding_status": "active_ftmo_only_validation"
+    },
+    {
+      "id": "ftmo_demo_100k_alfa",
+      "prop_firm": "ftmo",
+      "risk_profile_id": "ftmo_demo_100k",
+      "policy_id": "ftmo_demo_100k",
+      "account_size": 100000,
+      "is_active": false,
+      "instrument_scope": "ftmo_forex_universe",
+      "environment": "prod",
+      "execution_mode": "auto",
+      "execution_bridge": "mt5_local_ftmo_demo_100k",
+      "live_allowed_asset_classes": [
+        "forex"
+      ],
+      "context_source_id": "ftmo_mt5_local",
+      "context_health_mode": "auto",
+      "onboarding_status": "pending_second_ftmo_demo_bridge"
+    }
+  ],
+  "universes": {
+    "gft_forex_universe": {
+      "type": "static",
+      "mode": "static_explicit",
+      "symbols": {
+        "forex": [
+          "AUDCAD",
+          "AUDCHF",
+          "AUDJPY",
+          "AUDNZD",
+          "AUDUSD",
+          "CADCHF",
+          "CADJPY",
+          "CHFJPY",
+          "EURAUD",
+          "EURCAD",
+          "EURCHF",
+          "EURGBP",
+          "EURJPY",
+          "EURNZD",
+          "EURUSD",
+          "GBPAUD",
+          "GBPCAD",
+          "GBPCHF",
+          "GBPJPY",
+          "GBPNZD",
+          "GBPUSD",
+          "NZDCAD",
+          "NZDCHF",
+          "NZDUSD",
+          "USDCAD",
+          "USDCHF",
+          "USDJPY"
+        ]
+      }
+    },
+    "gft_universe": {
+      "type": "static",
+      "mode": "static_explicit",
+      "symbols": {
+        "equity": [
+          "AAPL",
+          "AMZN",
+          "BA",
+          "COST",
+          "JPM",
+          "KO",
+          "META",
+          "MSFT",
+          "NFLX",
+          "NVDA",
+          "ORCL",
+          "PLTR",
+          "TSLA",
+          "UNH",
+          "V"
+        ],
+        "forex": [
+          "AUDCAD",
+          "AUDCHF",
+          "AUDJPY",
+          "AUDNZD",
+          "AUDUSD",
+          "CADCHF",
+          "CADJPY",
+          "CHFJPY",
+          "EURAUD",
+          "EURCAD",
+          "EURCHF",
+          "EURGBP",
+          "EURJPY",
+          "EURNZD",
+          "EURUSD",
+          "GBPAUD",
+          "GBPCAD",
+          "GBPCHF",
+          "GBPJPY",
+          "GBPNZD",
+          "GBPUSD",
+          "NZDCAD",
+          "NZDCHF",
+          "NZDUSD",
+          "USDCAD",
+          "USDCHF",
+          "USDJPY"
+        ],
+        "crypto": [
+          "BCHUSD",
+          "BNBUSD",
+          "BTCUSD",
+          "ETHUSD",
+          "LTCUSD",
+          "SOLUSD"
+        ],
+        "index": [
+          "AUS200",
+          "GER40",
+          "JAP225",
+          "NAS100",
+          "SPX500",
+          "UK100",
+          "US30"
+        ],
+        "commodity": [
+          "BRENT",
+          "WTI",
+          "XAGUSD"
+        ]
+      }
+    },
+    "ftmo_universe": {
+      "type": "static",
+      "mode": "static_explicit",
+      "symbols": {
+        "forex": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "USDCHF",
+          "USDCAD",
+          "AUDUSD",
+          "NZDUSD",
+          "EURGBP",
+          "EURJPY",
+          "GBPJPY",
+          "EURCAD",
+          "EURAUD",
+          "EURNZD",
+          "GBPAUD",
+          "GBPCAD",
+          "GBPNZD",
+          "GBPCHF",
+          "EURCHF",
+          "AUDJPY",
+          "CADJPY",
+          "CHFJPY",
+          "AUDCAD",
+          "AUDNZD",
+          "AUDCHF",
+          "NZDJPY",
+          "NZDCAD",
+          "NZDCHF",
+          "CADCHF",
+          "EURHUF",
+          "EURPLN",
+          "EURSEK",
+          "EURNOK",
+          "EURCZK",
+          "USDMXN",
+          "USDZAR",
+          "USDHKD",
+          "USDSGD",
+          "USDTRY",
+          "USDHUF",
+          "USDPLN",
+          "USDSEK",
+          "USDNOK",
+          "USDDKK",
+          "SGDJPY",
+          "GBPSGD",
+          "GBPHKD",
+          "NZDSGD",
+          "EURHKD"
+        ],
+        "crypto": [
+          "BTCUSD",
+          "ETHUSD",
+          "LTCUSD",
+          "XRPUSD",
+          "BCHUSD",
+          "SOLUSD",
+          "BNBUSD",
+          "ADAUSD",
+          "DOTUSD",
+          "AVAXUSD"
+        ],
+        "index": [
+          "US500.cash",
+          "US100.cash",
+          "US30.cash",
+          "US2000.cash",
+          "DE40.cash",
+          "UK100.cash",
+          "JP225.cash",
+          "FR40.cash",
+          "ES35.cash",
+          "IT40.cash",
+          "NL25.cash",
+          "HK50.cash",
+          "AU200.cash",
+          "CN50.cash",
+          "STOXX50E.cash",
+          "NO25.cash",
+          "SG30.cash"
+        ],
+        "metal": [
+          "XAUUSD",
+          "XAGUSD",
+          "XCUUSD",
+          "XPDUSD",
+          "XPTUSD"
+        ],
+        "energy": [
+          "USOIL.cash",
+          "UKOIL.cash",
+          "NATGAS.cash"
+        ],
+        "agriculture": [
+          "CORN.c",
+          "SOYBEAN.c",
+          "WHEAT.c",
+          "SUGAR.c",
+          "COCOA.c",
+          "COFFEE.c"
+        ],
+        "equity": [
+          "AAPL",
+          "MSFT",
+          "AMZN",
+          "GOOGL",
+          "META",
+          "NVDA",
+          "TSLA",
+          "BRKB",
+          "JPM",
+          "JNJ",
+          "UNH",
+          "V",
+          "MA",
+          "PG",
+          "HD",
+          "BAC",
+          "ABBV",
+          "MRK",
+          "KO",
+          "PEP",
+          "COST",
+          "AVGO",
+          "WMT",
+          "MCD",
+          "CVX",
+          "LLY",
+          "TMO",
+          "DIS",
+          "DHR",
+          "CSCO",
+          "ABT",
+          "CRM",
+          "ADBE",
+          "NKE",
+          "BMY",
+          "NEE",
+          "PM",
+          "T",
+          "ORCL",
+          "TXN",
+          "QCOM",
+          "WFC",
+          "IBM",
+          "GE",
+          "BA",
+          "CAT",
+          "DE",
+          "MMM",
+          "AXP",
+          "GS",
+          "RTX",
+          "SPGI",
+          "NFLX",
+          "PYPL",
+          "UBER",
+          "SBUX",
+          "AMD",
+          "INTC",
+          "SAP",
+          "ASML",
+          "NVO",
+          "BIDU",
+          "NTES",
+          "NOW",
+          "SNOW",
+          "DDOG",
+          "PLTR",
+          "COIN",
+          "RBLX",
+          "TSM",
+          "SONY",
+          "TM",
+          "SHOP",
+          "SQ",
+          "SPOT",
+          "LYFT",
+          "DASH",
+          "ZM",
+          "DOCU",
+          "TWLO",
+          "NET",
+          "DKNG",
+          "ETSY",
+          "W",
+          "PINS",
+          "SNAP",
+          "ROKU"
+        ]
+      }
+    },
+    "ftmo_forex_universe": {
+      "type": "static",
+      "mode": "static_explicit",
+      "symbols": {
+        "forex": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "USDCHF",
+          "USDCAD",
+          "AUDUSD",
+          "NZDUSD",
+          "EURGBP",
+          "EURJPY",
+          "GBPJPY",
+          "EURCAD",
+          "EURAUD",
+          "EURNZD",
+          "GBPAUD",
+          "GBPCAD",
+          "GBPNZD",
+          "GBPCHF",
+          "EURCHF",
+          "AUDJPY",
+          "CADJPY",
+          "CHFJPY",
+          "AUDCAD",
+          "AUDNZD",
+          "AUDCHF",
+          "NZDJPY",
+          "NZDCAD",
+          "NZDCHF",
+          "CADCHF",
+          "EURHUF",
+          "EURPLN",
+          "EURSEK",
+          "EURNOK",
+          "EURCZK",
+          "USDMXN",
+          "USDZAR",
+          "USDHKD",
+          "USDSGD",
+          "USDTRY",
+          "USDHUF",
+          "USDPLN",
+          "USDSEK",
+          "USDNOK",
+          "USDDKK",
+          "SGDJPY",
+          "GBPSGD",
+          "GBPHKD",
+          "NZDSGD",
+          "EURHKD"
+        ]
+      }
+    }
+  },
+  "policy_templates": {
+    "gft_standard_v1": {
+      "side_controls": {
+        "allow_long": true,
+        "allow_short": true
+      },
+      "position_limits": {
+        "max_open_positions": 3,
+        "block_duplicate_symbols": true,
+        "max_holding_minutes": 240,
+        "auto_close_after_max_holding": true
+      },
+      "drawdown_rules": {
+        "daily_loss_pause_pct": 0.03,
+        "trailing_drawdown_pause_pct": 0.05,
+        "pause_until_next_day": true
+      },
+      "sizing_by_asset_class": {
+        "forex": {
+          "method": "risk_per_stop_pips",
+          "risk_per_trade_pct": 0.005,
+          "min_sl_pips": 20,
+          "min_tp_pips": 40,
+          "pip_value_usd_per_standard_lot": {
+            "EURUSD": 10.0,
+            "GBPUSD": 10.0,
+            "AUDUSD": 10.0,
+            "NZDUSD": 10.0,
+            "USDJPY": 6.27,
+            "USDCAD": 7.19,
+            "USDCHF": 11.24,
+            "EURGBP": 12.6,
+            "EURJPY": 6.27,
+            "EURCAD": 7.19,
+            "EURCHF": 11.24,
+            "EURAUD": 6.5,
+            "EURNZD": 5.7,
+            "GBPJPY": 6.27,
+            "GBPAUD": 6.5,
+            "GBPCAD": 7.19,
+            "GBPCHF": 11.24,
+            "GBPNZD": 5.7,
+            "AUDJPY": 6.27,
+            "AUDCAD": 7.19,
+            "AUDCHF": 11.24,
+            "AUDNZD": 5.7,
+            "CADJPY": 6.27,
+            "CADCHF": 11.24,
+            "CHFJPY": 6.27,
+            "NZDCAD": 7.19,
+            "NZDCHF": 11.24,
+            "default": 10.0
+          }
+        },
+        "crypto": {
+          "method": "risk_per_stop_spread_aware",
+          "risk_per_trade_pct": 0.005,
+          "max_notional_pct": 0.05,
+          "min_qty": 1e-06,
+          "min_sl_pct": 0.008,
+          "min_tp_pct": 0.024,
+          "sl_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0,
+          "contract_sizes": {
+            "BTCUSD": 1,
+            "ETHUSD": 1,
+            "BNBUSD": 1,
+            "BCHUSD": 1,
+            "SOLUSD": 1,
+            "LTCUSD": 1,
+            "AVAXUSD": 1,
+            "default": 1
+          },
+          "_sizing_comment": "qty = min(risk/sl_dist, max_notional_pct*equity/price) per contract. Verify contract_sizes against MT5 Market Watch > Specification."
+        },
+        "equity": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0
+        },
+        "index": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0
+        },
+        "commodity": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        },
+        "metal": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        },
+        "energy": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        }
+      },
+      "reject_rules": {
+        "enforce_universe": true,
+        "enforce_session": true,
+        "enforce_position_limit": true,
+        "enforce_heat_limit": false,
+        "enforce_duplicate_block": true,
+        "enforce_drawdown_pause": true,
+        "enforce_blackout": true
+      }
+    },
+    "gft_10k_v1": {
+      "side_controls": {
+        "allow_long": true,
+        "allow_short": true
+      },
+      "position_limits": {
+        "max_open_positions": 5,
+        "block_duplicate_symbols": true,
+        "max_holding_minutes": 240,
+        "auto_close_after_max_holding": true
+      },
+      "drawdown_rules": {
+        "daily_loss_pause_pct": 0.03,
+        "trailing_drawdown_pause_pct": 0.05,
+        "pause_until_next_day": true
+      },
+      "sizing_by_asset_class": {
+        "forex": {
+          "method": "risk_per_stop_pips",
+          "risk_per_trade_pct": 0.005,
+          "min_sl_pips": 20,
+          "min_tp_pips": 40,
+          "pip_value_usd_per_standard_lot": {
+            "EURUSD": 10.0,
+            "GBPUSD": 10.0,
+            "AUDUSD": 10.0,
+            "NZDUSD": 10.0,
+            "USDJPY": 6.27,
+            "USDCAD": 7.19,
+            "USDCHF": 11.24,
+            "EURGBP": 12.6,
+            "EURJPY": 6.27,
+            "EURCAD": 7.19,
+            "EURCHF": 11.24,
+            "EURAUD": 6.5,
+            "EURNZD": 5.7,
+            "GBPJPY": 6.27,
+            "GBPAUD": 6.5,
+            "GBPCAD": 7.19,
+            "GBPCHF": 11.24,
+            "GBPNZD": 5.7,
+            "AUDJPY": 6.27,
+            "AUDCAD": 7.19,
+            "AUDCHF": 11.24,
+            "AUDNZD": 5.7,
+            "CADJPY": 6.27,
+            "CADCHF": 11.24,
+            "CHFJPY": 6.27,
+            "NZDCAD": 7.19,
+            "NZDCHF": 11.24,
+            "default": 10.0
+          }
+        },
+        "crypto": {
+          "method": "risk_per_stop_spread_aware",
+          "risk_per_trade_pct": 0.005,
+          "max_notional_pct": 0.05,
+          "min_qty": 1e-06,
+          "min_sl_pct": 0.008,
+          "min_tp_pct": 0.024,
+          "sl_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0,
+          "contract_sizes": {
+            "BTCUSD": 1,
+            "ETHUSD": 1,
+            "BNBUSD": 1,
+            "BCHUSD": 1,
+            "SOLUSD": 1,
+            "LTCUSD": 1,
+            "AVAXUSD": 1,
+            "default": 1
+          },
+          "_sizing_comment": "qty = min(risk/sl_dist, max_notional_pct*equity/price) per contract. Verify contract_sizes against MT5 Market Watch > Specification."
+        },
+        "equity": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0
+        },
+        "index": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 1.5,
+          "tp_atr_multiple": 3.0
+        },
+        "commodity": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        },
+        "metal": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        },
+        "energy": {
+          "method": "atr_position_size",
+          "risk_per_trade_pct": 0.005,
+          "stop_atr_multiple": 2.0,
+          "tp_atr_multiple": 4.0
+        }
+      },
+      "reject_rules": {
+        "enforce_universe": true,
+        "enforce_session": true,
+        "enforce_position_limit": true,
+        "enforce_heat_limit": false,
+        "enforce_duplicate_block": true,
+        "enforce_drawdown_pause": true,
+        "enforce_blackout": true,
+        "enforce_streak_minimum": true,
+        "min_streak_required": 4
+      }
+    }
+  },
+  "crypto_spread_config": {
+    "enabled": true,
+    "fetch_live_spread": true,
+    "min_tp_spread_multiple": 3.0,
+    "max_allowed_spread_pct": 0.5,
+    "emergency_default_spread_pct": 0.5,
+    "fallback_spreads_absolute": {
+      "BTCUSD": 80.0,
+      "ETHUSD": 2.5,
+      "SOLUSD": 0.3,
+      "BNBUSD": 1.5,
+      "XRPUSD": 0.005,
+      "LTCUSD": 0.2,
+      "BCHUSD": 0.5
+    }
+  },
+  "execution": {
+    "mode": "manual",
+    "live_allowed_asset_classes": [
+      "forex"
+    ],
+    "bridges": {
+      "mt5_local_gft_10k": {
+        "description": "GFT 10K \u2014 local MT5/DWX execution bridge",
+        "context_source_id": "gft_mt5_local",
+        "policy_id": "gft_10k_v1",
+        "max_lots_safety": 0.01
+      },
+      "metaapi_gft_10k": {
+        "account_id": "ENV:GFT_10K_ACCOUNT_ID",
+        "api_token": "ENV:METAAPI_TOKEN",
+        "base_url": "ENV:METAAPI_BASE_URL",
+        "timeout_s": 30,
+        "description": "GFT 10K Pay Later Phase 1 eval \u2014 MetaApi London region",
+        "policy_id": "gft_10k_v1"
+      },
+      "metaapi_gft_5k": {
+        "account_id": "ENV:GFT_5K_ACCOUNT_ID",
+        "api_token": "ENV:METAAPI_TOKEN",
+        "base_url": "ENV:METAAPI_BASE_URL",
+        "timeout_s": 30,
+        "description": "GFT 5K 2-Step Standard Step 1 eval \u2014 MetaApi London region",
+        "policy_id": "gft_standard_v1"
+      },
+      "mt5_local_ftmo_demo_100k": {
+        "description": "FTMO Demo 100K \u2014 local MT5/DWX execution bridge",
+        "context_source_id": "ftmo_mt5_local",
+        "policy_id": "ftmo_demo_100k",
+        "max_lots_safety": 100.0
+      }
+    },
+    "routes": {
+      "metaapi_gft": {
+        "suffix_all": ".x"
+      },
+      "signalstack_ttp": {
+        "suffix_all": ""
+      }
+    },
+    "signalstack": {
+      "webhook_url": "ENV:SIGNALSTACK_WEBHOOK_URL",
+      "timeout_seconds": 5,
+      "max_retries": 2,
+      "retry_delay_seconds": 1.0,
+      "order_type": "market",
+      "log_payloads": true
+    },
+    "telegram": {
+      "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+      "chat_id": "ENV:TELEGRAM_CHAT_ID",
+      "enabled": true
+    },
+    "defaults": {
+      "execution_mode": "manual",
+      "max_trades_per_run": 5,
+      "max_per_side": 3
+    }
+  },
+  "data_sources": {
+    "ibkr": {
+      "enabled": false,
+      "primary_for": [
+        "forex"
+      ],
+      "note": "IBKR for forex \u2014 set enabled=true when TWS/Gateway is running on port 4001"
+    },
+    "twelvedata": {
+      "enabled": true,
+      "primary_for": [
+        "forex"
+      ],
+      "note": "Alternative source path for non-MT5 providers. Not the active crypto baseline."
+    },
+    "alpaca": {
+      "enabled": true,
+      "primary_for": [
+        "equity"
+      ],
+      "note": "Alpaca REST for equity during market hours"
+    },
+    "mt5_local": {
+      "enabled": false,
+      "dwx_files_path": "/Users/sjani008/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/MQL5/Files",
+      "symbol_suffix": ".x",
+      "primary_for": [],
+      "note": "Prod GFT runs broker context through gft_mt5_local; V1 market-data polling should not use the FTMO MT5 path."
+    }
+  },
+  "context_sources": {
+    "gft_mt5_local": {
+      "enabled": true,
+      "source_type": "dwx_mt5",
+      "source": "mt5_dwx",
+      "broker": "gft",
+      "dwx_files_path": "/Users/sjani008/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/MQL5/Files",
+      "symbol_suffix": ".x",
+      "primary_for": [
+        "forex"
+      ],
+      "profiles": {
+        "gft_10k": {
+          "enabled": true,
+          "account_number": "414578793"
+        },
+        "gft_5k": {
+          "enabled": false,
+          "account_number": "414489524"
+        }
+      }
+    },
+    "ftmo_mt5_local": {
+      "enabled": true,
+      "source_type": "dwx_mt5",
+      "source": "mt5_dwx",
+      "broker": "ftmo",
+      "dwx_files_path": "/Users/Shared/FTMO_MT5_FILES",
+      "symbol_suffix": "",
+      "primary_for": [
+        "forex",
+        "crypto",
+        "index",
+        "metal",
+        "energy",
+        "agriculture",
+        "equity"
+      ],
+      "profiles": {
+        "ftmo_demo_100k": {
+          "enabled": true,
+          "account_number": "1513073754"
+        },
+        "ftmo_demo_100k_alfa": {
+          "enabled": false,
+          "account_number": ""
+        }
+      },
+      "note": "Active FTMO DWX source via shared path for QA validation."
+    }
+  },
+  "v2_prefilter": {
+    "defaults": {
+      "max_stale_minutes": 10.0,
+      "min_rel_vol": 0.3,
+      "max_spread_pct": 0.05,
+      "min_bars_warmup": 50,
+      "session_avg_window": 20
+    },
+    "asset_thresholds": {
+      "forex": {
+        "max_stale_minutes": 5.0,
+        "min_bars_warmup": 12
+      },
+      "crypto": {
+        "max_stale_minutes": 15.0,
+        "min_rel_vol": 0.3,
+        "min_bars_warmup": 50
+      }
+    },
+    "crypto_validation": {
+      "enabled": false,
+      "thresholds": {
+        "max_stale_minutes": 20.0,
+        "min_rel_vol": 0.0,
+        "max_spread_pct": 0.08,
+        "min_bars_warmup": 12,
+        "session_avg_window": 12
+      },
+      "note": "Disabled baseline. Keep as an alternative validation branch for providers without MT5 context."
+    }
+  },
+  "v6_health": {
+    "enabled": true,
+    "default_context_source_id": "gft_mt5_local",
+    "mode_requirements": {
+      "manual": {
+        "required_context": [
+          "quote",
+          "daemon"
+        ],
+        "ready_state_allows_execution": false
+      },
+      "auto": {
+        "required_context": [
+          "quote",
+          "account",
+          "positions",
+          "orders",
+          "symbol_specs",
+          "daemon"
+        ],
+        "ready_state_allows_execution": true
+      },
+      "live": {
+        "required_context": [
+          "quote",
+          "account",
+          "positions",
+          "orders",
+          "symbol_specs",
+          "daemon"
+        ],
+        "ready_state_allows_execution": true
+      }
+    },
+    "thresholds": {
+      "quote_max_age_ms": 15000,
+      "account_max_age_ms": 15000,
+      "positions_max_age_ms": 15000,
+      "orders_max_age_ms": 15000,
+      "ingest_run_max_age_ms": 10000,
+      "symbol_specs_max_age_minutes": 1440,
+      "candidate_max_age_ms": 120000
+    },
+    "crypto_validation": {
+      "enabled": true,
+      "block_execution": false,
+      "quote_max_age_ms": 900000,
+      "note": "FTMO demo validation: crypto uses the validation-aware health path but may proceed to approval when context is fresh."
+    }
+  },
+  "market_data": {
+    "sessions": {
+      "equity": {
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "start": "09:30",
+        "end": "16:00"
+      },
+      "index": {
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "start": "09:30",
+        "end": "16:00"
+      },
+      "forex": {
+        "days": [
+          6,
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "start": "17:00",
+        "end": "17:00"
+      },
+      "crypto": {
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "start": null,
+        "end": null
+      }
+    },
+    "sources": {
+      "equity": [
+        "alpaca",
+        "ibkr"
+      ],
+      "forex": [
+        "ibkr",
+        "twelvedata"
+      ],
+      "crypto": [
+        "mt5_local",
+        "twelvedata"
+      ],
+      "index": [
+        "ibkr"
+      ],
+      "commodity": [
+        "ibkr"
+      ]
+    },
+    "twelvedata_symbols": {
+      "forex": [
+        "EUR/USD",
+        "GBP/USD",
+        "USD/JPY",
+        "USD/CHF",
+        "AUD/USD",
+        "USD/CAD",
+        "NZD/USD",
+        "EUR/GBP",
+        "EUR/JPY",
+        "GBP/JPY",
+        "AUD/JPY",
+        "EUR/AUD",
+        "EUR/CAD",
+        "EUR/CHF",
+        "EUR/NZD",
+        "GBP/AUD",
+        "GBP/CAD",
+        "GBP/CHF",
+        "GBP/NZD",
+        "AUD/CAD",
+        "AUD/CHF",
+        "AUD/NZD",
+        "CAD/CHF",
+        "CAD/JPY",
+        "CHF/JPY",
+        "NZD/CAD",
+        "NZD/CHF",
+        "NZD/JPY",
+        "EUR/HUF",
+        "EUR/PLN",
+        "EUR/SEK",
+        "EUR/NOK",
+        "EUR/CZK",
+        "USD/MXN",
+        "USD/ZAR",
+        "USD/HKD",
+        "USD/SGD",
+        "USD/TRY",
+        "USD/HUF",
+        "USD/PLN",
+        "USD/SEK",
+        "USD/NOK",
+        "USD/DKK",
+        "SGD/JPY",
+        "GBP/SGD",
+        "GBP/HKD",
+        "NZD/SGD",
+        "EUR/HKD"
+      ],
+      "crypto": [
+        "BCH/USD",
+        "BNB/USD",
+        "BTC/USD",
+        "ETH/USD",
+        "LTC/USD",
+        "SOL/USD",
+        "XRP/USD",
+        "ADA/USD",
+        "DOT/USD",
+        "AVAX/USD"
+      ]
+    },
+    "primary_source_by_asset_class": {
+      "forex": "twelvedata",
+      "crypto": "mt5_local"
+    }
+  },
+  "session_windows_utc": {
+    "equity": {
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "open": "13:30",
+      "close": "20:00"
+    },
+    "index": {
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "open": "13:30",
+      "close": "20:00"
+    },
+    "forex": {
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        6
+      ],
+      "open": "22:00",
+      "close": "22:00_next"
+    },
+    "crypto": {
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "open": "00:00",
+      "close": "23:59"
+    },
+    "commodity": {
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "open": "13:30",
+      "close": "20:00"
+    }
+  },
+  "risk_defaults": {
+    "ml_thresholds": {
+      "equity": {
+        "long": 0.5,
+        "short": 0.5
+      },
+      "forex": {
+        "long": 0.5,
+        "short": 0.5
+      },
+      "commodity": {
+        "long": 0.5,
+        "short": 0.5
+      },
+      "crypto": {
+        "long": 0.5,
+        "short": 0.5
+      },
+      "index": {
+        "long": 0.5,
+        "short": 0.5
+      }
+    },
+    "gft": {
+      "max_positions": 2,
+      "risk_per_trade_pct": 0.005,
+      "daily_loss_limit_pct": 0.03,
+      "max_portfolio_heat_pct": 0.02,
+      "min_sl_pips": 20.0,
+      "min_tp_pips": 40.0,
+      "min_crypto_qty": 1e-06,
+      "min_crypto_sl_pct": 0.008,
+      "min_crypto_tp_pct": 0.024
+    }
+  },
+  "models": {
+    "equity": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/equity_regressors",
+      "meta_file": "meta.json"
+    },
+    "forex": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/vanguard/latest",
+      "model_kind": "joblib_regressor",
+      "meta_file": "lgbm_ridge_shap14_forward_return_v1_meta.json",
+      "artifact_files": [
+        "lgbm_ridge_shap14_forward_return_v1.joblib"
+      ],
+      "model_id": "lgbm_ridge_shap14_forward_return_v1"
+    },
+    "crypto": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/vanguard/latest",
+      "meta_file": "vanguard_crypto_model_meta.json"
+    },
+    "metal": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/lgbm_metals_energy_v1",
+      "meta_file": "meta.json"
+    },
+    "energy": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/lgbm_metals_energy_v1",
+      "meta_file": "meta.json"
+    },
+    "index": {
+      "model_dir": "/Users/sjani008/SS/Vanguard/models/lgbm_index_v1",
+      "meta_file": "meta.json"
+    }
+  },
+  "telegram": {
+    "enabled": true,
+    "max_message_chars": 3500,
+    "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+    "chat_id": "ENV:TELEGRAM_CHAT_ID",
+    "diagnostics": {
+      "enabled": true,
+      "max_stage_rows": 6,
+      "include_context_state": true,
+      "include_v2_health": true
+    }
+  },
+  "ttp_daemon": {
+    "enabled": false,
+    "username": "ENV:TTP_USERNAME",
+    "password": "ENV:TTP_PASSWORD",
+    "account_id": "SEV10K2767",
+    "poll_interval_seconds": 30,
+    "headless": false,
+    "login_url": "https://app.tradethepool.com/",
+    "db_path": "/Users/sjani008/SS/Vanguard/data/ttp_daemon.db",
+    "_note": "Set headless=false for selector discovery (Task 7.3). Switch to true after selectors verified."
+  },
+  "temporary_overrides": {},
+  "calendar_blackouts": [],
+  "exit_rules": {
+    "enabled": true,
+    "close_on_signal_flip": true,
+    "move_sl_to_breakeven_on_streak_drop": true,
+    "min_streak_for_hold": 3,
+    "min_hold_minutes": 120,
+    "max_hold_minutes": 240,
+    "check_interval_seconds": 30
+  },
+  "position_manager": {
+    "enabled": false,
+    "poll_interval_seconds": 30,
+    "scheduled_flatten": {
+      "enabled": true,
+      "eligible_profiles": [
+        "ftmo_demo_100k",
+        "ftmo_demo_100k_alfa"
+      ],
+      "start_et": "16:45",
+      "end_et": "18:00"
+    },
+    "timeout_auto_close": {
+      "enabled": true,
+      "eligible_profiles": [
+        "ftmo_demo_100k",
+        "ftmo_demo_100k_alfa"
+      ],
+      "skip_legacy_exit_rules": true
+    },
+    "default_policy_by_asset_class": {
+      "forex": "forward_return_12bar_forex_v1"
+    },
+    "policies": {
+      "forward_return_12bar_forex_v1": {
+        "asset_class": "forex",
+        "model_family": "forward_return",
+        "model_horizon_bars": 12,
+        "bar_interval_minutes": 5,
+        "initial_flip_grace_bars": 2,
+        "early_exit_min_bars": 2,
+        "early_exit_requires_negative_pnl": true,
+        "early_exit_requires_two_consecutive_opposite_cycles": true,
+        "early_exit_requires_same_side_v51_pass_false": true,
+        "early_exit_requires_same_side_selection_false": true,
+        "early_exit_skip_if_near_tp": true,
+        "near_tp_threshold_rr": 0.8,
+        "review_at_bars": 12,
+        "close_at_30m_if_profit_below_rr": 0.25,
+        "extend_to_bars": 12,
+        "max_extensions": 1,
+        "extension_requires_profit": true,
+        "extension_min_rr": 0.5,
+        "extension_requires_same_side_signal": true,
+        "extension_requires_v51_pass": true,
+        "extension_requires_v52_selected": true,
+        "extension_allowed_followthrough_states": [
+          "ALIGNED",
+          "FLAT"
+        ],
+        "extension_disallowed_post_entry_health_codes": [
+          "FATAL_POSITION_MISSING",
+          "BROKER_STATE_INVALID"
+        ],
+        "breakeven_on_extension": true,
+        "breakeven_offset_mode": "spread",
+        "hard_close_bars": 12,
+        "allow_scale_in": false,
+        "allow_tp_extension": false,
+        "action_cooldown_seconds": 60,
+        "max_retry_count_per_action": 3
+      }
+    }
+  },
+  "crypto_validation_mode": true
+}

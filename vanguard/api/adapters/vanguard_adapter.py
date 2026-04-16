@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 from typing import Any
 
+from vanguard.config.runtime_config import get_shadow_db_path
 from vanguard.helpers.clock import utc_to_et
 from vanguard.helpers.bars import parse_utc
 from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
-_DB = os.path.expanduser("~/SS/Vanguard/data/vanguard_universe.db")
+_DB = get_shadow_db_path()
 
 
 def _latest_prices_for_symbols(
@@ -102,6 +102,31 @@ def get_candidates(
                 con,
                 sorted({str(row["symbol"]) for row in rows if row["symbol"]}),
             )
+
+            # V6 policy decisions — prefer gft_10k account over gft_5k
+            v6_data: dict[tuple[str, str], dict[str, Any]] = {}
+            try:
+                v6_rows = con.execute(
+                    """
+                    SELECT symbol, direction, entry_price, stop_price, tp_price,
+                           shares_or_lots, status,
+                           COALESCE(rejection_reason, '') AS rejection_reason,
+                           account_id
+                    FROM vanguard_tradeable_portfolio
+                    WHERE cycle_ts_utc = ?
+                      AND account_id IN ('gft_10k', 'gft_5k')
+                    ORDER BY account_id
+                    """,
+                    (latest,),
+                ).fetchall()
+                for r in v6_rows:
+                    key = (str(r["symbol"]), str(r["direction"]))
+                    row_d = dict(r)
+                    # gft_10k overrides gft_5k for the same symbol/direction
+                    if key not in v6_data or str(row_d.get("account_id")) == "gft_10k":
+                        v6_data[key] = row_d
+            except Exception as v6_exc:
+                logger.debug("VanguardAdapter: V6 portfolio lookup failed: %s", v6_exc)
     except Exception as exc:
         logger.warning(f"VanguardAdapter: query failed: {exc}")
         return {"candidates": [], "readiness": "data_ready", "lane_status": "staged"}
@@ -137,6 +162,15 @@ def get_candidates(
         else:
             strats = [s.strip() for s in strats_raw.split(",") if s.strip()]
 
+        # V6 policy engine decision for this symbol/direction
+        v6 = v6_data.get((sym, side)) or {}
+        v6_status = str(v6.get("status") or "") or None
+        v6_stop_price = float(v6["stop_price"]) if v6.get("stop_price") is not None else None
+        v6_tp_price = float(v6["tp_price"]) if v6.get("tp_price") is not None else None
+        v6_shares_or_lots = float(v6["shares_or_lots"]) if v6.get("shares_or_lots") is not None else None
+        v6_entry_price = float(v6["entry_price"]) if v6.get("entry_price") is not None else None
+        v6_rejection_reason = str(v6.get("rejection_reason") or "") or None
+
         candidates.append({
             "row_id":  f"vanguard:{sym}:{side}:{latest}",
             "source":  "vanguard",
@@ -158,6 +192,14 @@ def get_candidates(
             },
             "lane_status": "staged",
             "readiness":   "shortlist_ready",
+            # V6 policy engine fields — surfaced at top level so normalizeCandidateRow
+            # picks them up into native for desk prefill and candidate display
+            "v6_status":           v6_status,
+            "v6_stop_price":       v6_stop_price,
+            "v6_tp_price":         v6_tp_price,
+            "v6_shares_or_lots":   v6_shares_or_lots,
+            "v6_entry_price":      v6_entry_price,
+            "v6_rejection_reason": v6_rejection_reason,
             "native": {
                 "strategy":           row["strategy"],
                 "strategy_rank":      row["strategy_rank"],
@@ -174,6 +216,13 @@ def get_candidates(
                 "tbm_profile":        row["tbm_profile"],
                 "price_source":       px_info.get("price_source"),
                 "price_bar_ts_utc":   px_info.get("price_bar_ts_utc"),
+                # V6 sizing duplicated into native for createOrderFromCandidate access
+                "v6_status":           v6_status,
+                "v6_stop_price":       v6_stop_price,
+                "v6_tp_price":         v6_tp_price,
+                "v6_shares_or_lots":   v6_shares_or_lots,
+                "v6_entry_price":      v6_entry_price,
+                "v6_rejection_reason": v6_rejection_reason,
             },
         })
 

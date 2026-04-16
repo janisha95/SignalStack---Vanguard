@@ -27,6 +27,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path.home() / "SS" / ".env")
 
+try:
+    from vanguard.helpers.symbol_identity import to_broker as _symbol_to_broker
+    _HAS_SYMBOL_IDENTITY = True
+except ImportError:
+    _HAS_SYMBOL_IDENTITY = False
+
 logger = logging.getLogger("mt5_executor")
 
 METAAPI_BASE_URL = os.environ.get(
@@ -59,8 +65,22 @@ _EXECUTOR_CACHE: dict[str, "MetaApiExecutor"] = {}
 
 
 def _mt5_symbol(symbol: str) -> str:
+    """Translate canonical internal symbol to GFT broker form.
+
+    Priority:
+      1. Explicit VANGUARD_TO_GFT map (handles special cases like SPY→SPX500.x)
+      2. to_broker('metaapi_gft', canonical) via symbol_identity (adds .x suffix)
+      3. Raw normalized fallback
+    """
     normalized = str(symbol or "").upper().replace("/", "").replace(".CASH", "").strip()
-    return VANGUARD_TO_GFT.get(normalized, normalized)
+    if normalized in VANGUARD_TO_GFT:
+        return VANGUARD_TO_GFT[normalized]
+    if _HAS_SYMBOL_IDENTITY:
+        try:
+            return _symbol_to_broker("metaapi_gft", normalized)
+        except Exception:
+            pass
+    return normalized
 
 
 def _resolve_account_env(account_key: str = "") -> str:

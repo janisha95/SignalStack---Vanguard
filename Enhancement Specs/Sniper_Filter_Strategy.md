@@ -4,7 +4,8 @@
 **Date:** 2026-04-05  
 **Target:** Immediate implementation in Phase 2b (QAenv)  
 **Goal:** Turn the current system into a low-frequency, high-RRR “bill printing machine” that passes GFT prop firm evaluations easily and scales profitably.
-
+Addition: Think of state when data is stale, so the streak breaks because of data being stale and not the Instrument in action having inconsistent presisted signal.
+This persistance gate or filter needs to think of stale session state. 
 ---
 
 ## 1. Core Philosophy

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from vanguard.helpers.bars import aggregate_1m_to_5m, aggregate_5m_to_1h
+from vanguard.helpers.bars import parse_utc
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -28,6 +30,8 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA busy_timeout=30000")
+    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA temp_store=MEMORY")
     return con
 
 
@@ -63,18 +67,99 @@ def _load_1m_bars(
     symbol: str,
     asset_class: str,
     data_source: str,
+    start_ts_utc: str | None = None,
 ) -> list[dict]:
-    rows = con.execute(
-        """
+    query = """
         SELECT symbol, bar_ts_utc, open, high, low, close, volume,
                asset_class, data_source
         FROM vanguard_bars_1m
         WHERE symbol = ? AND asset_class = ? AND data_source = ?
-        ORDER BY bar_ts_utc
-        """,
-        (symbol, asset_class, data_source),
-    ).fetchall()
+    """
+    params: list[str] = [symbol, asset_class, data_source]
+    if start_ts_utc:
+        query += " AND bar_ts_utc >= ?"
+        params.append(start_ts_utc)
+    query += " ORDER BY bar_ts_utc"
+    rows = con.execute(query, params).fetchall()
+    if rows:
+        return [dict(row) for row in rows]
+
+    # Fallback: universe member source can differ from the actual historical source.
+    query = """
+        SELECT symbol, bar_ts_utc, open, high, low, close, volume,
+               asset_class, data_source
+        FROM vanguard_bars_1m
+        WHERE symbol = ? AND asset_class = ?
+    """
+    params = [symbol, asset_class]
+    if start_ts_utc:
+        query += " AND bar_ts_utc >= ?"
+        params.append(start_ts_utc)
+    query += " ORDER BY bar_ts_utc"
+    rows = con.execute(query, params).fetchall()
     return [dict(row) for row in rows]
+
+
+def _load_5m_bars(
+    con: sqlite3.Connection,
+    symbol: str,
+    asset_class: str,
+    data_source: str,
+    start_ts_utc: str | None = None,
+) -> list[dict]:
+    query = """
+        SELECT symbol, bar_ts_utc, open, high, low, close, volume,
+               asset_class, data_source
+        FROM vanguard_bars_5m
+        WHERE symbol = ? AND asset_class = ? AND data_source = ?
+    """
+    params: list[str] = [symbol, asset_class, data_source]
+    if start_ts_utc:
+        query += " AND bar_ts_utc >= ?"
+        params.append(start_ts_utc)
+    query += " ORDER BY bar_ts_utc"
+    rows = con.execute(query, params).fetchall()
+    if rows:
+        return [dict(row) for row in rows]
+
+    # Fallback: universe member source can differ from the actual historical source.
+    query = """
+        SELECT symbol, bar_ts_utc, open, high, low, close, volume,
+               asset_class, data_source
+        FROM vanguard_bars_5m
+        WHERE symbol = ? AND asset_class = ?
+    """
+    params = [symbol, asset_class]
+    if start_ts_utc:
+        query += " AND bar_ts_utc >= ?"
+        params.append(start_ts_utc)
+    query += " ORDER BY bar_ts_utc"
+    rows = con.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _max_bar_ts(
+    con: sqlite3.Connection,
+    table: str,
+    symbol: str,
+    asset_class: str | None = None,
+    data_source: str | None = None,
+) -> str | None:
+    query = f"SELECT MAX(bar_ts_utc) FROM {table} WHERE symbol = ?"
+    params: list[str] = [symbol]
+    if asset_class is not None:
+        query += " AND asset_class = ?"
+        params.append(asset_class)
+    if data_source is not None:
+        query += " AND data_source = ?"
+        params.append(data_source)
+    return con.execute(query, params).fetchone()[0]
+
+
+def _offset_iso(ts_utc: str | None, *, minutes: int) -> str | None:
+    if not ts_utc:
+        return None
+    return (parse_utc(ts_utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _insert_5m(con: sqlite3.Connection, rows: list[dict]) -> int:
@@ -113,6 +198,7 @@ def aggregate_asset_classes(
     db_path: Path = DB_PATH,
     asset_classes: tuple[str, ...] = DEFAULT_ASSET_CLASSES,
     dry_run: bool = False,
+    full_rebuild: bool = False,
 ) -> dict[str, int]:
     con = _connect(db_path)
     try:
@@ -128,10 +214,27 @@ def aggregate_asset_classes(
         }
 
         for index, (symbol, asset_class, data_source) in enumerate(symbols, start=1):
-            bars_1m = _load_1m_bars(con, symbol, asset_class, data_source)
+            start_1m_ts = None
+            start_5m_ts = None
+            if not full_rebuild:
+                max_5m_ts = _max_bar_ts(con, "vanguard_bars_5m", symbol, asset_class, data_source)
+                max_1h_ts = _max_bar_ts(con, "vanguard_bars_1h", symbol)
+                if max_5m_ts:
+                    start_1m_ts = _offset_iso(max_5m_ts, minutes=10)
+                if max_1h_ts:
+                    start_5m_ts = _offset_iso(max_1h_ts, minutes=65)
+
+            bars_1m = _load_1m_bars(con, symbol, asset_class, data_source, start_ts_utc=start_1m_ts)
             totals["bars_1m"] += len(bars_1m)
             rows_5m = aggregate_1m_to_5m(bars_1m)
-            rows_1h = aggregate_5m_to_1h(rows_5m)
+            bars_5m_for_1h = _load_5m_bars(
+                con,
+                symbol,
+                asset_class,
+                data_source,
+                start_ts_utc=start_5m_ts,
+            )
+            rows_1h = aggregate_5m_to_1h(bars_5m_for_1h)
             totals["bars_5m_attempted"] += len(rows_5m)
             totals["bars_1h_attempted"] += len(rows_1h)
 
@@ -164,6 +267,7 @@ def main() -> None:
         help="Comma-separated asset classes to aggregate",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--full-rebuild", action="store_true")
     args = parser.parse_args()
 
     asset_classes = tuple(part.strip() for part in args.asset_classes.split(",") if part.strip())
@@ -171,6 +275,7 @@ def main() -> None:
         db_path=Path(args.db),
         asset_classes=asset_classes,
         dry_run=args.dry_run,
+        full_rebuild=args.full_rebuild,
     )
     print("\nTotals:")
     for key, value in totals.items():

@@ -22,6 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from vanguard.helpers.db import connect_wal
+from vanguard.config.runtime_config import get_runtime_config, get_shadow_db_path
 from vanguard.helpers.clock import now_utc, iso_utc
 
 logging.basicConfig(
@@ -31,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("vanguard_selection_simple")
 
-DB_PATH = str(_REPO_ROOT / "data" / "vanguard_universe.db")
+DB_PATH = get_shadow_db_path()
 PREDICTION_MIN_ABS = 0.0
 
 CREATE_SHORTLIST_V2 = """
@@ -215,10 +216,19 @@ def run(*, dry_run: bool = False, top_n: int = 30, show_n: int = 5, db_path: str
 
 
 def main() -> int:
+    runtime_cfg = get_runtime_config().get("runtime") or {}
     parser = argparse.ArgumentParser(description="Vanguard V5 simple selection")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--top-n", type=int, default=30)
-    parser.add_argument("--show-n", type=int, default=5)
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=int(runtime_cfg.get("shortlist_top_n_per_asset_class", 30)),
+    )
+    parser.add_argument(
+        "--show-n",
+        type=int,
+        default=int(runtime_cfg.get("shortlist_display_top_n", 5)),
+    )
     args = parser.parse_args()
     result = run(dry_run=args.dry_run, top_n=args.top_n, show_n=args.show_n)
     return 0 if result.get("status") not in {"no_predictions"} else 1

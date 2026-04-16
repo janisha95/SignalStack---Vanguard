@@ -9,16 +9,16 @@ Location: ~/SS/Vanguard/vanguard/helpers/correlation_checker.py
 from __future__ import annotations
 
 import logging
-import sqlite3
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from vanguard.config.runtime_config import get_shadow_db_path
+from vanguard.helpers.db import sqlite_conn
+
 logger = logging.getLogger(__name__)
 
-_ROOT    = Path(__file__).resolve().parent.parent.parent
-_DB_PATH = str(_ROOT / "data" / "vanguard_universe.db")
+_DB_PATH = get_shadow_db_path()
 
 _LOOKBACK_BARS = 390   # ≈ 60 trading days × 6.5h
 
@@ -38,7 +38,7 @@ def compute_correlations(
         return pd.DataFrame()
 
     placeholders = ",".join("?" * len(symbols))
-    with sqlite3.connect(db_path) as con:
+    with sqlite_conn(db_path) as con:
         rows = con.execute(
             f"""
             SELECT symbol, bar_ts_utc, close

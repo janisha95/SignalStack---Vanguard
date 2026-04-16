@@ -12,17 +12,22 @@ import json
 import logging
 import os
 import sqlite3
+import uuid
 from collections import Counter
 from datetime import date as date_type, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from vanguard.executors.mt5_executor import MetaApiExecutor
+
+from vanguard.config.runtime_config import get_risk_defaults, get_shadow_db_path
 from vanguard.helpers.clock import now_et
+from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
 VANGUARD_ROOT = Path(__file__).resolve().parent.parent.parent
-VANGUARD_DB   = VANGUARD_ROOT / "data" / "vanguard_universe.db"
+VANGUARD_DB = get_shadow_db_path()
 ML_THRESHOLD_CONFIG = VANGUARD_ROOT / "config" / "vanguard_ml_thresholds.json"
 
 CREATE_EXECUTION_LOG = """
@@ -114,6 +119,10 @@ _ML_THRESHOLDS_CACHE: dict[str, dict[str, float]] | None = None
 def _load_ml_thresholds() -> dict[str, dict[str, float]]:
     global _ML_THRESHOLDS_CACHE
     if _ML_THRESHOLDS_CACHE is None:
+        runtime_thresholds = (get_risk_defaults().get("ml_thresholds") or {})
+        if isinstance(runtime_thresholds, dict) and runtime_thresholds:
+            _ML_THRESHOLDS_CACHE = runtime_thresholds
+            return _ML_THRESHOLDS_CACHE
         try:
             with open(ML_THRESHOLD_CONFIG) as fh:
                 _ML_THRESHOLDS_CACHE = json.load(fh)
@@ -125,7 +134,7 @@ def _load_ml_thresholds() -> dict[str, dict[str, float]]:
 
 def init_table() -> None:
     """Create the execution_log table if it doesn't exist, then migrate columns."""
-    with sqlite3.connect(str(VANGUARD_DB)) as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         con.execute(CREATE_EXECUTION_LOG)
         con.commit()
         # Add any new columns that may be missing from an existing table
@@ -324,7 +333,7 @@ def _log_execution(
     symbol: str,
     direction: str,
     tier: str,
-    shares: int,
+    shares: int | float,   # float for crypto/forex fractional lots
     entry_price: float | None,
     stop_loss: float | None,
     take_profit: float | None,
@@ -340,7 +349,7 @@ def _log_execution(
     """Write one row to execution_log. Returns the new row id."""
     execution_fee = estimate_ttp_fee(shares)
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             cur = con.execute(
                 """
                 INSERT INTO execution_log
@@ -365,6 +374,96 @@ def _log_execution(
     except Exception as exc:
         logger.error(f"Failed to log execution: {exc}")
         return None
+
+
+_CRYPTO_SYMBOLS = {
+    "BTCUSD", "ETHUSD", "SOLUSD", "LTCUSD", "BNBUSD", "XRPUSD", "ADAUSD",
+    "DOTUSD", "LINKUSD", "AVAXUSD", "MATICUSD", "DOGEUSD", "ATOMUSD", "UNIUSD",
+    "AAVEUSD", "BNBUSD",
+}
+_INDEX_SYMBOLS = {"SPX500", "NAS100", "US30", "SPX", "NDX", "DJI"}
+_FOREX_SUFFIXES = ("USD", "JPY", "GBP", "EUR", "AUD", "NZD", "CAD", "CHF")
+
+
+def _infer_asset_class(symbol: str, trade_asset_class: str | None) -> str:
+    """Best-effort asset class inference for journal writes.
+    Prefers the trade's own asset_class field; falls back to symbol patterns."""
+    if trade_asset_class:
+        return str(trade_asset_class).strip().lower()
+    sym = str(symbol or "").upper()
+    if sym in _CRYPTO_SYMBOLS:
+        return "crypto"
+    if sym in _INDEX_SYMBOLS:
+        return "index"
+    if len(sym) == 6 and sym.isalpha() and any(sym.endswith(s) for s in _FOREX_SUFFIXES):
+        return "forex"
+    return "equity"
+
+
+def _insert_trade_journal_row(
+    broker_position_id: str,
+    profile_id: str,
+    symbol: str,
+    direction: str,
+    lot_size: float,
+    entry_price: float | None,
+    sl_price: float | None,
+    tp_price: float | None,
+    asset_class: str,
+    source: str = "manual_ui_execute",
+) -> None:
+    """
+    Insert a row into vanguard_trade_journal immediately after a successful
+    broker fill via MetaApiExecutor.
+
+    This is what makes auto_close.py find the row when the 4-hour rule fires,
+    instead of logging the 'no row found for broker_position_id' warning.
+
+    The lifecycle daemon will update status to CLOSED when auto_close fires.
+    """
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    trade_id = f"manual_{str(uuid.uuid4())}"
+    try:
+        with sqlite_conn(VANGUARD_DB) as con:
+            con.execute(
+                """
+                INSERT INTO vanguard_trade_journal (
+                    trade_id, profile_id, symbol, asset_class, side,
+                    approved_cycle_ts_utc, approved_qty,
+                    expected_entry, expected_sl, expected_tp,
+                    approval_reasoning_json,
+                    broker_position_id, submitted_at_utc, filled_at_utc,
+                    status, last_synced_at_utc, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trade_id,
+                    str(profile_id or ""),
+                    str(symbol or "").upper(),
+                    asset_class,
+                    str(direction or "LONG").upper(),
+                    now_utc,
+                    float(lot_size or 0.0),
+                    float(entry_price or 0.0),
+                    float(sl_price or 0.0),
+                    float(tp_price or 0.0),
+                    json.dumps({"source": source, "broker_position_id": str(broker_position_id)}),
+                    str(broker_position_id or ""),
+                    now_utc,
+                    now_utc,
+                    "OPEN",
+                    now_utc,
+                    f"source={source}",
+                ),
+            )
+            con.commit()
+    except Exception as exc:
+        # Journal insert failure is not fatal — broker trade already happened.
+        # Log warning so we know the journal is out of sync, but do not raise.
+        logger.warning(
+            "Failed to insert journal row for ticket %s: %s",
+            broker_position_id, exc,
+        )
 
 
 def _parse_iso_date(value: Any) -> str | None:
@@ -401,10 +500,15 @@ def _load_execution_rows_for_account(account_id: str | None) -> list[dict[str, A
     where = ""
     params: list[Any] = []
     if account_id:
-        where = "WHERE COALESCE(account, '') IN (?, '')"
+        # Part A fix (Task D7): match ONLY rows explicitly tagged with this account.
+        # The old COALESCE(account,'') IN (?, '') wildcard pulled in all null-account rows
+        # (= 14k+ anonymous orchestrator FORWARD_TRACKED rows), inflating unrealized PnL
+        # computation via yfinance to thousands of dollars. Null-account rows belong to
+        # the orchestrator's anonymous forward-tracking, not to any named account.
+        where = "WHERE account = ?"
         params.append(account_id)
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             rows = con.execute(
                 f"SELECT * FROM execution_log {where} ORDER BY executed_at DESC",
@@ -414,6 +518,30 @@ def _load_execution_rows_for_account(account_id: str | None) -> list[dict[str, A
     except Exception as exc:
         logger.error("load_execution_rows_for_account error: %s", exc)
         return []
+
+
+def _read_account_state_for_profile(profile_id: str) -> dict[str, Any] | None:
+    """
+    Read live account state from the broker-mirrored vanguard_account_state table.
+    Populated every daemon cycle by lifecycle_daemon._update_account_state().
+    Returns None if no row exists for this profile.
+    """
+    try:
+        with sqlite_conn(VANGUARD_DB) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                """
+                SELECT profile_id, equity, starting_equity_today,
+                       daily_pnl_pct, trailing_dd_pct, updated_at_utc
+                FROM vanguard_account_state
+                WHERE profile_id = ?
+                """,
+                (profile_id,),
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.error("_read_account_state_for_profile %s error: %s", profile_id, exc)
+        return None
 
 
 def _get_live_prices_batch(symbols: list[str]) -> dict[str, float]:
@@ -545,10 +673,11 @@ def _sector_lookup() -> dict[str, str]:
 def _risk_for_trade(trade: dict[str, Any]) -> float:
     entry = float(trade.get("entry_price") or 0.0)
     stop = float(trade.get("stop_loss") or 0.0)
-    shares = int(trade.get("shares") or 0)
-    if entry <= 0 or stop <= 0 or shares <= 0:
+    # Use pre-resolved effective qty when available (handles fractional crypto/forex)
+    qty = float(trade.get("_effective_qty") or trade.get("quantity") or trade.get("shares") or 0)
+    if entry <= 0 or stop <= 0 or qty <= 0:
         return 0.0
-    return abs(entry - stop) * shares
+    return abs(entry - stop) * qty
 
 
 def _normalize_asset_class(trade: dict[str, Any]) -> str | None:
@@ -615,12 +744,37 @@ def _evaluate_trade_batch(
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     profile = _normalize_profile(profile_id)
     account_key = str(profile.get("id") or DEFAULT_RISK_PROFILE["id"])
-    account_rows = _load_execution_rows_for_account(account_key if profile_id else None)
-    open_positions = [r for r in account_rows if not r.get("outcome") or str(r.get("outcome")).upper() == "OPEN"]
-    daily_pnl, total_pnl = _compute_account_pnl(account_rows)
-    weekly_pnl = _compute_weekly_pnl(account_rows)
-    trades_today = _get_trades_today(account_rows)
-    volume_today = _get_volume_today(account_rows)
+
+    # Part B (Task D7): broker-truth PnL branch for metaapi profiles.
+    # For metaapi (GFT) accounts the lifecycle daemon mirrors live broker state into
+    # vanguard_account_state every 60 seconds. Use that as the authoritative PnL source.
+    # For signalstack/TTP profiles, fall through to the execution_log + yfinance path.
+    broker_kind = str(profile.get("execution_bridge") or "").split("_")[0]  # "metaapi"|"mt5"|"signalstack"|""
+
+    if broker_kind == "metaapi":
+        acct_state  = _read_account_state_for_profile(account_key)
+        equity      = float((acct_state or {}).get("equity") or profile.get("account_size") or 0.0)
+        starting    = float((acct_state or {}).get("starting_equity_today") or equity)
+        account_size = float(profile.get("account_size") or starting or equity)
+        daily_pnl   = round(equity - starting, 2)         # negative = loss, positive = gain today
+        total_pnl   = round(equity - account_size, 2)     # vs initial account size
+        weekly_pnl  = daily_pnl                           # weekly not tracked in account_state yet
+        account_rows   = []   # execution_log not used for metaapi PnL
+        open_positions = []   # lifecycle daemon owns this via vanguard_open_positions
+        trades_today   = 0
+        volume_today   = 0.0
+    else:
+        # NOTE: yfinance unrealized PnL is the only PnL source for signalstack
+        # profiles (TTP) because they have no broker-side mirror. For metaapi
+        # profiles, the broker-truth branch above bypasses this entirely.
+        # Sprint 3 cleanup: consider replacing yfinance for signalstack with
+        # manual close-price entry or removing real-time PnL display for TTP.
+        account_rows   = _load_execution_rows_for_account(account_key if profile_id else None)
+        open_positions = [r for r in account_rows if not r.get("outcome") or str(r.get("outcome")).upper() == "OPEN"]
+        daily_pnl, total_pnl = _compute_account_pnl(account_rows)
+        weekly_pnl   = _compute_weekly_pnl(account_rows)
+        trades_today = _get_trades_today(account_rows)
+        volume_today = _get_volume_today(account_rows)
     existing_symbols = {(str(r.get("symbol") or "").upper(), str(r.get("direction") or "").upper()) for r in open_positions}
     sector_map = _sector_lookup()
     existing_sector_counts = Counter(
@@ -672,7 +826,13 @@ def _evaluate_trade_batch(
         working_trade = dict(trade)
         symbol = str(trade.get("symbol") or "").upper()
         direction = str(trade.get("direction") or "LONG").upper()
-        shares = int(working_trade.get("shares") or 0)
+        # Use quantity (exact fractional float) when provided (V6-authoritative for crypto/forex),
+        # otherwise fall back to integer shares.
+        _raw_qty = trade.get("quantity")
+        effective_qty: float = float(_raw_qty) if _raw_qty is not None else float(working_trade.get("shares") or 0)
+        shares = int(round(effective_qty)) if effective_qty >= 1 else effective_qty  # type: ignore[assignment]
+        # For risk calculations, always use the exact float qty
+        working_trade["_effective_qty"] = effective_qty
         entry = float(working_trade.get("entry_price") or 0.0)
         stop = float(working_trade.get("stop_loss") or 0.0)
         sector = sector_map.get(symbol)
@@ -680,8 +840,8 @@ def _evaluate_trade_batch(
         rules_fired: list[str] = []
 
         reject_reason: tuple[str, str] | None = None
-        if shares <= 0 or entry <= 0 or stop <= 0:
-            reject_reason = ("invalid_trade", "Trade missing valid shares, entry, or stop")
+        if effective_qty <= 0 or entry <= 0 or stop <= 0:
+            reject_reason = ("invalid_trade", "Trade missing valid qty, entry, or stop")
         elif str(profile.get("instrument_scope") or "all") == "us_equities" and asset_class not in (None, "equity", "us_equity"):
             reject_reason = ("instrument_scope", f"Profile {account_key} only allows US equities, got {asset_class}")
         elif str(profile.get("instrument_scope") or "all") == "forex_cfd" and asset_class not in ("forex", "index", "metal", "energy", "crypto", "commodity"):
@@ -765,36 +925,42 @@ def _evaluate_trade_batch(
 
         max_single_pct = float(profile.get("max_single_position_pct", 0.10))
         max_position_value = float(profile["account_size"]) * max_single_pct
-        position_value = shares * entry
+        position_value = effective_qty * entry
         if position_value > max_position_value:
-            new_shares = int(max_position_value / entry) if entry > 0 else 0
-            if new_shares <= 0:
-                audit = _profile_audit_metadata(profile, ["profile_sizing_cap"])
-                rejected.append({
-                    "client_order_key": trade.get("client_order_key"),
-                    "symbol": symbol,
-                    "direction": direction,
-                    "reason": f"Trade cannot be resized within {max_single_pct * 100:.0f}% single-position cap",
-                    "check": "profile_sizing_cap",
-                    "resized": False,
-                    "resize_reason": None,
-                    "model_readiness": readiness_gate["model_readiness"],
-                    "model_source": readiness_gate["model_source"],
-                    "gate_policy": readiness_gate["gate_policy"],
-                    "fallback_in_effect": readiness_gate["fallback_in_effect"],
-                    **audit,
-                })
-                continue
-            working_trade["original_shares"] = shares
-            working_trade["shares"] = new_shares
-            working_trade["resized"] = True
-            working_trade["resize_reason"] = (
-                f"Capped from {shares} to {new_shares} shares "
-                f"(max {max_single_pct * 100:.0f}% of account)"
-            )
-            shares = new_shares
-            position_value = shares * entry
-            rules_fired.append("profile_sizing_cap")
+            # For V6-authoritative tickets (quantity present), skip resize — V6 already sized correctly
+            has_v6_qty = trade.get("quantity") is not None
+            if has_v6_qty:
+                # V6 sizing is authoritative; position value check is informational only
+                rules_fired.append("v6_authoritative_skip_resize")
+            else:
+                new_shares = int(max_position_value / entry) if entry > 0 else 0
+                if new_shares <= 0:
+                    audit = _profile_audit_metadata(profile, ["profile_sizing_cap"])
+                    rejected.append({
+                        "client_order_key": trade.get("client_order_key"),
+                        "symbol": symbol,
+                        "direction": direction,
+                        "reason": f"Trade cannot be resized within {max_single_pct * 100:.0f}% single-position cap",
+                        "check": "profile_sizing_cap",
+                        "resized": False,
+                        "resize_reason": None,
+                        "model_readiness": readiness_gate["model_readiness"],
+                        "model_source": readiness_gate["model_source"],
+                        "gate_policy": readiness_gate["gate_policy"],
+                        "fallback_in_effect": readiness_gate["fallback_in_effect"],
+                        **audit,
+                    })
+                    continue
+                working_trade["original_shares"] = shares
+                working_trade["shares"] = new_shares
+                working_trade["resized"] = True
+                working_trade["resize_reason"] = (
+                    f"Capped from {shares} to {new_shares} shares "
+                    f"(max {max_single_pct * 100:.0f}% of account)"
+                )
+                effective_qty = float(new_shares)
+                position_value = effective_qty * entry
+                rules_fired.append("profile_sizing_cap")
 
         new_risk = _risk_for_trade(working_trade)
 
@@ -987,7 +1153,9 @@ def execute_trades(
     for trade in approved_trades:
         symbol    = str(trade["symbol"]).upper()
         direction = str(trade["direction"]).upper()
-        shares    = int(trade.get("shares", 100))
+        # Use exact fractional quantity when present (V6-authoritative for crypto/forex)
+        _raw_qty = trade.get("quantity") or trade.get("_effective_qty")
+        shares    = float(_raw_qty) if _raw_qty is not None else int(trade.get("shares", 100))
         tier      = str(trade.get("tier", "manual"))
         scores    = trade.get("scores")
         tags      = trade.get("tags") or []
@@ -999,7 +1167,7 @@ def execute_trades(
         order_type = str(trade["order_type"]) if trade.get("order_type") is not None else None
         limit_buffer = float(trade["limit_buffer"]) if trade.get("limit_buffer") is not None else None
 
-        if adapter and str(selected_profile.get("webhook_url") or "").strip():
+        if execution_bridge == "signalstack" and str(selected_profile.get("webhook_url") or "").strip():
             try:
                 limit_price = None
                 stop_price = None
@@ -1010,7 +1178,7 @@ def execute_trades(
                 resp = adapter.send_order(
                     symbol=symbol,
                     direction=direction,
-                    quantity=shares,
+                    quantity=shares,   # float for crypto/forex, int for equity
                     operation="open",
                     limit_price=limit_price,
                     stop_price=stop_price,
@@ -1025,10 +1193,153 @@ def execute_trades(
                 success = False
                 status  = "ERROR"
                 error   = str(exc)
+
+        elif execution_bridge.startswith("metaapi_"):
+            # MetaApi dispatch — routes to the correct GFT account by bridge key
+            account_key = execution_bridge[len("metaapi_"):]  # e.g. "gft_10k"
+            executor = MetaApiExecutor(account_key=account_key)
+            if not executor.connect():
+                resp    = {
+                    "success": False,
+                    "error": f"MetaApiExecutor.connect() failed for account_key={account_key} — check METAAPI_TOKEN and account env vars",
+                    "execution_bridge": execution_bridge,
+                }
+                success = False
+                status  = "FAILED"
+                error   = resp["error"]
+            else:
+                try:
+                    metaapi_resp = executor.execute_trade(
+                        symbol=symbol,
+                        direction=direction,
+                        lot_size=float(shares),
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                    )
+                    if metaapi_resp.get("status") == "filled":
+                        ticket = str(metaapi_resp.get("ticket") or metaapi_resp.get("orderId") or "")
+                        resp    = {
+                            "success": True,
+                            "ticket": ticket,
+                            "symbol": metaapi_resp.get("symbol"),
+                            "execution_bridge": execution_bridge,
+                            "raw": metaapi_resp,
+                        }
+                        success = True
+                        status  = "SUBMITTED"
+                        error   = None
+                        # Write journal row so auto_close.py finds it by broker_position_id
+                        _insert_trade_journal_row(
+                            broker_position_id=ticket,
+                            profile_id=str(selected_profile.get("id") or ""),
+                            symbol=symbol,
+                            direction=direction,
+                            lot_size=float(shares),
+                            entry_price=entry_price,
+                            sl_price=stop_loss,
+                            tp_price=take_profit,
+                            asset_class=_infer_asset_class(symbol, trade.get("asset_class")),
+                            source="manual_ui_execute",
+                        )
+                    else:
+                        resp    = {
+                            "success": False,
+                            "error": metaapi_resp.get("error") or str(metaapi_resp),
+                            "execution_bridge": execution_bridge,
+                            "raw": metaapi_resp,
+                        }
+                        success = False
+                        status  = "FAILED"
+                        error   = resp["error"]
+                except Exception as exc:
+                    resp    = {
+                        "success": False,
+                        "error": f"MetaApi execute raised: {exc}",
+                        "execution_bridge": execution_bridge,
+                    }
+                    success = False
+                    status  = "ERROR"
+                    error   = str(exc)
+                    logger.error(
+                        "[trade_desk] MetaApi execute failed symbol=%s direction=%s account_key=%s: %s",
+                        symbol, direction, account_key, exc,
+                    )
+
+        elif execution_bridge.startswith("mt5_local_"):
+            # DWX fallback dispatch — requires MT5DWXAdapter (MT5 desktop must be running)
+            account_key = execution_bridge[len("mt5_local_"):]
+            try:
+                from vanguard.executors.dwx_executor import DWXExecutor
+                from vanguard.execution.mt5_dwx_adapter import MT5DWXAdapter
+                mt5_adapter = MT5DWXAdapter(profile_id=account_key)
+                mt5_adapter.connect()
+                dwx_exec = DWXExecutor(
+                    mt5_adapter=mt5_adapter,
+                    profile_id=account_key,
+                    db_path=VANGUARD_DB,
+                )
+                dwx_resp = dwx_exec.execute_trade(
+                    symbol=symbol,
+                    direction=direction,
+                    lot_size=float(shares),
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                )
+                if dwx_resp.get("status") == "filled":
+                    ticket = str(dwx_resp.get("ticket") or dwx_resp.get("order_id") or "")
+                    resp    = {
+                        "success": True,
+                        "ticket": ticket,
+                        "fill_price": dwx_resp.get("price"),
+                        "symbol": symbol,
+                        "execution_bridge": execution_bridge,
+                        "raw": dwx_resp,
+                    }
+                    success = True
+                    status  = "SUBMITTED"
+                    error   = None
+                    _insert_trade_journal_row(
+                        broker_position_id=ticket,
+                        profile_id=str(selected_profile.get("id") or ""),
+                        symbol=symbol,
+                        direction=direction,
+                        lot_size=float(shares),
+                        entry_price=entry_price,
+                        sl_price=stop_loss,
+                        tp_price=take_profit,
+                        asset_class=_infer_asset_class(symbol, trade.get("asset_class")),
+                        source="manual_ui_execute_dwx",
+                    )
+                else:
+                    resp    = {
+                        "success": False,
+                        "error": dwx_resp.get("error") or str(dwx_resp),
+                        "execution_bridge": execution_bridge,
+                        "raw": dwx_resp,
+                    }
+                    success = False
+                    status  = "FAILED"
+                    error   = resp["error"]
+            except Exception as exc:
+                # DWX unavailable — fall through to FORWARD_TRACKED with explicit reason
+                logger.warning(
+                    "[trade_desk] DWX dispatch unavailable for %s: %s — forward-tracking",
+                    execution_bridge, exc,
+                )
+                resp    = {
+                    "forward_tracked": True,
+                    "reason": f"DWX dispatch unavailable: {exc}",
+                    "execution_bridge": execution_bridge,
+                }
+                success = True
+                status  = "FORWARD_TRACKED"
+                error   = None
+
         else:
-            # Non-SignalStack bridge or no webhook configured — forward-track only
+            # Unknown or unconfigured bridge — forward-track with reason
             resp    = {
                 "forward_tracked": True,
+                "reason": f"unknown execution_bridge: {execution_bridge!r}",
                 "execution_bridge": execution_bridge,
                 "profile_id": selected_profile.get("id"),
             }
@@ -1123,7 +1434,7 @@ def get_execution_log(
     where = " AND ".join(clauses)
 
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             rows = con.execute(
                 f"""
@@ -1153,7 +1464,7 @@ def estimate_ttp_fee(shares: int) -> float:
 
 def get_execution(execution_id: int) -> dict[str, Any] | None:
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             row = con.execute(
                 "SELECT * FROM execution_log WHERE id = ?",
@@ -1175,7 +1486,7 @@ def update_execution_fill(execution_id: int, data: dict[str, Any]) -> dict[str, 
     set_parts = [f"{k} = ?" for k in fields]
     values = list(fields.values()) + [execution_id]
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             if not con.execute(
                 "SELECT id FROM execution_log WHERE id = ?",
@@ -1218,7 +1529,7 @@ def update_execution(
     if not fields:
         # Nothing to update — return current row
         try:
-            with sqlite3.connect(str(VANGUARD_DB)) as con:
+            with sqlite_conn(VANGUARD_DB) as con:
                 con.row_factory = sqlite3.Row
                 row = con.execute(
                     "SELECT * FROM execution_log WHERE id = ?", (execution_id,)
@@ -1238,7 +1549,7 @@ def update_execution(
     values = list(fields.values()) + [execution_id]
 
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             if not con.execute(
                 "SELECT id FROM execution_log WHERE id = ?", (execution_id,)
@@ -1261,7 +1572,7 @@ def update_execution(
 def delete_execution(execution_id: int) -> bool:
     """Delete one execution log row by id."""
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             cur = con.execute("DELETE FROM execution_log WHERE id = ?", (execution_id,))
             con.commit()
             return cur.rowcount > 0
@@ -1295,7 +1606,7 @@ def delete_executions_bulk(
             clauses.append("DATE(executed_at) < ?")
             params.append(before_date)
         where = " AND ".join(clauses)
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             cur = con.execute(f"DELETE FROM execution_log WHERE {where}", params)
             con.commit()
             return cur.rowcount
@@ -1322,7 +1633,7 @@ def get_analytics(period: str = "last_30_days") -> dict[str, Any]:
     offset = period_map.get(period, "-30 days")
 
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             if offset:
                 rows = con.execute(

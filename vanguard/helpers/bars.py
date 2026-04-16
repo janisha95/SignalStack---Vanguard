@@ -101,35 +101,35 @@ def normalize_mt5_bar(
 # 1m → 5m aggregation
 # ---------------------------------------------------------------------------
 
-def aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
+def aggregate_1m_to_timeframe(bars_1m: list[dict], timeframe_minutes: int) -> list[dict]:
     """
-    Aggregate a list of 1m bars into 5m bars.
-    5 × 1m = 5m. Groups by clock-aligned 5-minute UTC buckets.
+    Aggregate a list of 1m bars into a clock-aligned intraday timeframe.
 
     Grouping rule:
         bar_open_utc = bar_ts_utc (end time) - 1 min
-        5m_bucket    = floor(bar_open_utc.minute / 5) * 5
-        5m bar_ts_utc = bucket_start + 5 min  (end-of-bucket, Vanguard convention)
+        bucket_start = floor(bar_open_utc to timeframe_minutes)
+        bar_ts_utc   = bucket_start + timeframe_minutes
 
     OHLCV:
-        open  = first bar's open  (chronological order)
-        high  = max of highs
-        low   = min of lows
-        close = last bar's close
+        open   = first bar's open
+        high   = max of highs
+        low    = min of lows
+        close  = last bar's close
         volume = sum of volumes
 
     Preserves asset_class and data_source from the last bar in each bucket.
-    Returns list of dicts matching vanguard_bars_5m schema.
     """
+    if timeframe_minutes <= 0:
+        raise ValueError("timeframe_minutes must be positive")
+
     groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
 
     for bar in bars_1m:
         bar_end  = parse_utc(bar["bar_ts_utc"])
         bar_open = bar_end - timedelta(minutes=1)
-        # Align to 5-min boundary
-        bucket_minute = (bar_open.minute // 5) * 5
+        bucket_minute = (bar_open.minute // timeframe_minutes) * timeframe_minutes
         bucket_start  = bar_open.replace(minute=bucket_minute, second=0, microsecond=0)
-        bucket_end    = bucket_start + timedelta(minutes=5)
+        bucket_end    = bucket_start + timedelta(minutes=timeframe_minutes)
         bucket_end_ts = bucket_end.strftime("%Y-%m-%dT%H:%M:%SZ")
         groups[(bar["symbol"], bucket_end_ts)].append(bar)
 
@@ -150,6 +150,11 @@ def aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
         })
 
     return result
+
+
+def aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
+    """Backward-compatible 1m → 5m wrapper."""
+    return aggregate_1m_to_timeframe(bars_1m, 5)
 
 
 # ---------------------------------------------------------------------------

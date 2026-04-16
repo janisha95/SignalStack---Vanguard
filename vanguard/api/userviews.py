@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from pathlib import Path
 from typing import Any
+
+from vanguard.config.runtime_config import get_shadow_db_path
+from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
-VANGUARD_ROOT = Path(__file__).resolve().parent.parent.parent
-VANGUARD_DB   = VANGUARD_ROOT / "data" / "vanguard_universe.db"
+VANGUARD_DB = get_shadow_db_path()
 
 CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS userviews (
@@ -83,9 +84,7 @@ SYSTEM_VIEWS: list[dict[str, Any]] = [
 
 
 def _get_conn() -> sqlite3.Connection:
-    con = sqlite3.connect(str(VANGUARD_DB))
-    con.row_factory = sqlite3.Row
-    return con
+    return sqlite_conn(VANGUARD_DB)
 
 
 def init_table() -> None:

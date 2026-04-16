@@ -56,3 +56,8 @@ build/
 
 # temp
 tmp_*
+
+# local tooling residue
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/

@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from pathlib import Path
 
 import numpy as np
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-_DB_PATH = str(_ROOT / "data" / "vanguard_universe.db")
+from vanguard.config.runtime_config import get_shadow_db_path
+from vanguard.helpers.db import sqlite_conn
+
+_DB_PATH = get_shadow_db_path()
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ def compute_atr(
     Compute Wilder's ATR(period) from the most recent `lookback` 5-minute bars.
     Returns 0.0 if insufficient data.
     """
-    with sqlite3.connect(db_path) as con:
+    with sqlite_conn(db_path) as con:
         rows = con.execute(
             """
             SELECT high, low, close

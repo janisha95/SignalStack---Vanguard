@@ -30,7 +30,13 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from vanguard.config.runtime_config import (
+    get_shadow_db_path,
+    get_twelvedata_symbols_config,
+    is_replay_from_source_db,
+)
 from vanguard.helpers.db import sqlite_conn
+from vanguard.helpers.symbol_identity import to_canonical, UnknownSymbolFormat
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +49,10 @@ _BATCH_SIZE  = int(os.environ.get("TWELVEDATA_BATCH_SIZE", "20"))
 _REQUEST_TIMEOUT = 30       # seconds
 _INTER_BATCH_SLEEP = 0.2    # seconds between batches (rate-limit pacing)
 _CREDITS_PER_MINUTE = int(os.environ.get("TWELVEDATA_CREDITS_PER_MINUTE", "55"))
+_INTERVAL_TO_MINUTES = {
+    "1min": 1,
+    "5min": 5,
+}
 
 _INVALID_API_KEYS = {
     "",
@@ -162,6 +172,8 @@ class TwelveDataAdapter:
 
     def _ensure_1m_table(self) -> None:
         """Create vanguard_bars_1m if it doesn't exist (idempotent)."""
+        if is_replay_from_source_db() and str(Path(self.db_path).resolve()) == str(Path(get_shadow_db_path()).resolve()):
+            return
         with sqlite_conn(self.db_path) as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS vanguard_bars_1m (
@@ -248,14 +260,17 @@ class TwelveDataAdapter:
         start_date: str,
         end_date: str | None = None,
         outputsize: int = 5000,
+        interval: str = "1min",
     ) -> int:
         """
-        Fetch historical 1m bars for a single symbol (backfill).
+        Fetch historical bars for a single symbol (backfill).
 
         start_date / end_date: "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS" (UTC)
         outputsize: max bars per request (Twelve Data cap: 5000 on Grow)
         Returns bars written.
         """
+        if interval not in _INTERVAL_TO_MINUTES:
+            raise ValueError(f"Unsupported historical interval: {interval}")
         global _API_KEY
         if not self.api_key:
             _API_KEY = _API_KEY or _load_twelve_data_key()
@@ -266,7 +281,7 @@ class TwelveDataAdapter:
 
         params: dict[str, Any] = {
             "symbol":     symbol,
-            "interval":   "1min",
+            "interval":   interval,
             "start_date": start_date,
             "apikey":     self.api_key,
             "timezone":   "UTC",
@@ -280,28 +295,35 @@ class TwelveDataAdapter:
                 f"{_BASE_URL}/time_series", params=params, timeout=_REQUEST_TIMEOUT
             )
             if resp.status_code != 200:
+                err = resp.text[:200]
                 logger.error(
                     "[twelvedata] Historical %s HTTP %d: %s",
-                    symbol, resp.status_code, resp.text[:200],
+                    symbol, resp.status_code, err,
                 )
+                self._last_errors.append(err)
+                self._error_count += 1
                 return 0
 
             data = resp.json()
             if data.get("status") == "error":
+                err = str(data.get("message", "unknown"))
                 logger.error(
                     "[twelvedata] Historical %s API error: %s",
-                    symbol, data.get("message", "unknown"),
+                    symbol, err,
                 )
+                self._last_errors.append(err)
+                self._error_count += 1
                 return 0
 
-            written = self._write_single_symbol(symbol, data)
+            written = self._write_single_symbol(symbol, data, interval=interval)
             self.bars_received += written
-            logger.info("[twelvedata] Backfill %s: %d bars", symbol, written)
+            logger.info("[twelvedata] Backfill %s %s: %d bars", symbol, interval, written)
             return written
 
         except Exception as exc:
             logger.error("[twelvedata] Historical %s error: %s", symbol, exc)
             self._last_errors.append(str(exc))
+            self._error_count += 1
             return 0
 
     # ------------------------------------------------------------------
@@ -386,21 +408,31 @@ class TwelveDataAdapter:
 
         return written
 
-    def _write_single_symbol(self, symbol: str, data: dict) -> int:
+    def _write_single_symbol(self, symbol: str, data: dict, interval: str = "1min") -> int:
         """
         Write bars from a single-symbol Twelve Data response.
 
         Twelve Data `values` list has most-recent bar first.
         Each bar: datetime (open time UTC), open, high, low, close, volume.
-        Vanguard convention: store bar END = open + 60s.
+        Vanguard convention: store bar END = open + interval.
         """
         values = data.get("values")
         if not values:
             return 0
+        if interval not in _INTERVAL_TO_MINUTES:
+            raise ValueError(f"Unsupported write interval: {interval}")
 
         asset_class = self.symbols.get(symbol, "unknown")
         now_iso     = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        interval_minutes = _INTERVAL_TO_MINUTES[interval]
+        target_table = "vanguard_bars_1m" if interval_minutes == 1 else "vanguard_bars_5m"
         rows        = []
+
+        # Normalize to canonical symbol at ingest boundary
+        try:
+            canonical_symbol = to_canonical("twelve_data", symbol)
+        except UnknownSymbolFormat:
+            canonical_symbol = str(symbol).upper().replace("/", "").strip()
 
         for bar in values:
             try:
@@ -408,10 +440,10 @@ class TwelveDataAdapter:
                 dt_open = datetime.strptime(bar["datetime"], "%Y-%m-%d %H:%M:%S")
                 dt_open = dt_open.replace(tzinfo=timezone.utc)
                 # Vanguard convention: bar_ts_utc = bar END time
-                bar_end_ts = (dt_open + timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                bar_end_ts = (dt_open + timedelta(minutes=interval_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 rows.append((
-                    symbol, bar_end_ts,
+                    canonical_symbol, bar_end_ts,
                     float(bar["open"]),
                     float(bar["high"]),
                     float(bar["low"]),
@@ -427,15 +459,26 @@ class TwelveDataAdapter:
 
         try:
             with sqlite_conn(self.db_path) as con:
-                con.executemany(
-                    """
-                    INSERT OR REPLACE INTO vanguard_bars_1m
-                        (symbol, bar_ts_utc, open, high, low, close, volume,
-                         asset_class, data_source, ingest_ts_utc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'twelvedata', ?)
-                    """,
-                    rows,
-                )
+                if target_table == "vanguard_bars_1m":
+                    con.executemany(
+                        """
+                        INSERT OR REPLACE INTO vanguard_bars_1m
+                            (symbol, bar_ts_utc, open, high, low, close, volume,
+                             asset_class, data_source, ingest_ts_utc)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'twelvedata', ?)
+                        """,
+                        rows,
+                    )
+                else:
+                    con.executemany(
+                        """
+                        INSERT OR REPLACE INTO vanguard_bars_5m
+                            (symbol, bar_ts_utc, open, high, low, close, volume,
+                             asset_class, data_source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'twelvedata')
+                        """,
+                        [row[:-1] for row in rows],
+                    )
                 con.commit()
             return len(rows)
         except Exception as exc:
@@ -464,27 +507,34 @@ def load_from_config(
     if config_path is None:
         config_path = str(_repo_root / "config" / "twelvedata_symbols.json")
     if db_path is None:
-        db_path = str(_repo_root / "data" / "vanguard_universe.db")
+        db_path = get_shadow_db_path()
 
-    symbol_map = get_active_symbols(db_path)
-    if symbol_map:
-        logger.info(
-            "[twelvedata] Loaded %d active symbols from universe_members",
-            len(symbol_map),
-        )
-    else:
+    cfg = get_twelvedata_symbols_config()
+    if not cfg:
         with open(config_path) as fh:
             cfg = json.load(fh)
 
-        symbol_map = {}
-        for asset_class, symbols in cfg.items():
-            if asset_class.startswith("_"):
-                continue
-            if isinstance(symbols, list):
-                for sym in symbols:
-                    symbol_map[sym] = asset_class
+    symbol_map: dict[str, str] = {}
+    for asset_class, symbols in cfg.items():
+        if str(asset_class).startswith("_"):
+            continue
+        if isinstance(symbols, list):
+            for sym in symbols:
+                symbol_map[str(sym)] = str(asset_class)
 
+    if symbol_map:
+        counts: dict[str, int] = {}
+        for asset_class in symbol_map.values():
+            counts[asset_class] = counts.get(asset_class, 0) + 1
         logger.info(
-            "[twelvedata] Loaded %d symbols from %s", len(symbol_map), config_path
+            "[twelvedata] Loaded %d runtime-config symbols %s",
+            len(symbol_map),
+            counts,
+        )
+    else:
+        symbol_map = get_active_symbols(db_path)
+        logger.info(
+            "[twelvedata] Runtime config empty; fallback loaded %d active symbols from universe_members",
+            len(symbol_map),
         )
     return TwelveDataAdapter(symbols=symbol_map, db_path=db_path, api_key=api_key)

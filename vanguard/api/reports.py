@@ -18,13 +18,14 @@ import logging
 import os
 import sqlite3
 from datetime import date as date_type
-from pathlib import Path
 from typing import Any
+
+from vanguard.config.runtime_config import get_shadow_db_path
+from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
-VANGUARD_ROOT = Path(__file__).resolve().parent.parent.parent
-VANGUARD_DB   = VANGUARD_ROOT / "data" / "vanguard_universe.db"
+VANGUARD_DB = get_shadow_db_path()
 
 CREATE_REPORT_CONFIGS = """
 CREATE TABLE IF NOT EXISTS report_configs (
@@ -43,15 +44,13 @@ CREATE TABLE IF NOT EXISTS report_configs (
 
 
 def init_table() -> None:
-    with sqlite3.connect(str(VANGUARD_DB)) as con:
+    with sqlite_conn(VANGUARD_DB) as con:
         con.execute(CREATE_REPORT_CONFIGS)
         con.commit()
 
 
 def _get_conn() -> sqlite3.Connection:
-    con = sqlite3.connect(str(VANGUARD_DB))
-    con.row_factory = sqlite3.Row
-    return con
+    return sqlite_conn(VANGUARD_DB)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -292,7 +291,7 @@ def _render_forward_track_block(block: dict, trade_date: str) -> str:
     metrics  = block.get("metrics", ["win_rate"])
 
     try:
-        with sqlite3.connect(str(VANGUARD_DB)) as con:
+        with sqlite_conn(VANGUARD_DB) as con:
             con.row_factory = sqlite3.Row
             rows = con.execute(
                 """

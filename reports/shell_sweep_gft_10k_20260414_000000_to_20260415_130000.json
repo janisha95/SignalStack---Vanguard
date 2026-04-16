@@ -1,0 +1,272 @@
+{
+  "profile_id": "gft_10k",
+  "start_utc": "2026-04-14T00:00:00Z",
+  "end_utc": "2026-04-15T13:00:00Z",
+  "base_dedupe_minutes": 60,
+  "horizons": [
+    30,
+    60,
+    120
+  ],
+  "shells": [
+    "20/40",
+    "25/50",
+    "30/60",
+    "40/80",
+    "50/100",
+    "60/120",
+    "80/160"
+  ],
+  "counts": {
+    "approved_rows": 1879,
+    "base_rows": 384,
+    "records": 7686
+  },
+  "summary": {
+    "20/40": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": -0.0023,
+        "median_r": 0.005,
+        "avg_pips": -0.047,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.016,
+        "time_exit_rate": 0.984
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.013,
+        "median_r": 0.01,
+        "avg_pips": 0.2603,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0325,
+        "time_exit_rate": 0.9675
+      },
+      "120": {
+        "n": 355,
+        "win_rate": 0.4958,
+        "avg_r": 0.0176,
+        "median_r": -0.0,
+        "avg_pips": 0.3516,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0113,
+        "sl_hit_rate": 0.0704,
+        "time_exit_rate": 0.9183
+      }
+    },
+    "25/50": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0014,
+        "median_r": 0.004,
+        "avg_pips": 0.0341,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0027,
+        "time_exit_rate": 0.9973
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.006,
+        "median_r": 0.008,
+        "avg_pips": 0.1508,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0244,
+        "time_exit_rate": 0.9756
+      },
+      "120": {
+        "n": 354,
+        "win_rate": 0.4972,
+        "avg_r": 0.0086,
+        "median_r": 0.0,
+        "avg_pips": 0.2159,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0452,
+        "time_exit_rate": 0.9548
+      }
+    },
+    "30/60": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0024,
+        "median_r": 0.0033,
+        "avg_pips": 0.0724,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.0055,
+        "median_r": 0.0067,
+        "avg_pips": 0.1654,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0108,
+        "time_exit_rate": 0.9892
+      },
+      "120": {
+        "n": 354,
+        "win_rate": 0.4972,
+        "avg_r": 0.0092,
+        "median_r": 0.0,
+        "avg_pips": 0.2747,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0254,
+        "time_exit_rate": 0.9746
+      }
+    },
+    "40/80": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0018,
+        "median_r": 0.0025,
+        "avg_pips": 0.0724,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.0048,
+        "median_r": 0.005,
+        "avg_pips": 0.1917,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0027,
+        "time_exit_rate": 0.9973
+      },
+      "120": {
+        "n": 352,
+        "win_rate": 0.5,
+        "avg_r": 0.0136,
+        "median_r": 0.0009,
+        "avg_pips": 0.5443,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0028,
+        "time_exit_rate": 0.9972
+      }
+    },
+    "50/100": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0014,
+        "median_r": 0.002,
+        "avg_pips": 0.0724,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.0033,
+        "median_r": 0.004,
+        "avg_pips": 0.1646,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0027,
+        "time_exit_rate": 0.9973
+      },
+      "120": {
+        "n": 352,
+        "win_rate": 0.5,
+        "avg_r": 0.0103,
+        "median_r": 0.0008,
+        "avg_pips": 0.5159,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0028,
+        "time_exit_rate": 0.9972
+      }
+    },
+    "60/120": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0012,
+        "median_r": 0.0017,
+        "avg_pips": 0.0724,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.0033,
+        "median_r": 0.0033,
+        "avg_pips": 0.195,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "120": {
+        "n": 352,
+        "win_rate": 0.5,
+        "avg_r": 0.0081,
+        "median_r": 0.0006,
+        "avg_pips": 0.4875,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0028,
+        "time_exit_rate": 0.9972
+      }
+    },
+    "80/160": {
+      "30": {
+        "n": 376,
+        "win_rate": 0.5133,
+        "avg_r": 0.0009,
+        "median_r": 0.0013,
+        "avg_pips": 0.0724,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "60": {
+        "n": 369,
+        "win_rate": 0.5203,
+        "avg_r": 0.0024,
+        "median_r": 0.0025,
+        "avg_pips": 0.195,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      },
+      "120": {
+        "n": 352,
+        "win_rate": 0.5,
+        "avg_r": 0.0069,
+        "median_r": 0.0005,
+        "avg_pips": 0.5555,
+        "ambiguous_rate": 0.0,
+        "tp_hit_rate": 0.0,
+        "sl_hit_rate": 0.0,
+        "time_exit_rate": 1.0
+      }
+    }
+  }
+}

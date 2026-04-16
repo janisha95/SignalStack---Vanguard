@@ -12,16 +12,15 @@ from __future__ import annotations
 import logging
 import sqlite3
 from datetime import date
-from pathlib import Path
 from typing import Any
 
+from vanguard.config.runtime_config import get_shadow_db_path
 from vanguard.helpers.clock import now_utc
 from vanguard.helpers.db import sqlite_conn
 
 logger = logging.getLogger(__name__)
 
-_ROOT    = Path(__file__).resolve().parent.parent.parent
-_DB_PATH = str(_ROOT / "data" / "vanguard_universe.db")
+_DB_PATH = get_shadow_db_path()
 
 _CREATE_STATE = """
 CREATE TABLE IF NOT EXISTS vanguard_portfolio_state (

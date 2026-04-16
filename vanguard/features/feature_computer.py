@@ -30,15 +30,15 @@ BENCHMARK_SYMBOLS = {
     "equity": "SPY",
     "index": "SPX",
     "forex": "DXY",
-    "metal": "XAU/USD",
-    "crypto": "BTC/USD",
+    "metal": "XAUUSD",
+    "crypto": "BTCUSD",
     "energy": "WTI",
     "commodity": "WTI",
     "agriculture": "CORN",
 }
 
 BENCHMARK_FALLBACKS = {
-    "forex": "EUR/USD",
+    "forex": "EURUSD",
 }
 
 NA_FEATURES_BY_ASSET_CLASS = {
@@ -130,6 +130,34 @@ _CRYPTO_DERIVED_FEATURES = [
 ]
 
 FEATURE_NAMES = FEATURE_NAMES + _CRYPTO_DERIVED_FEATURES
+
+
+def _symbol_variants(symbol: str | None) -> list[str]:
+    if not symbol:
+        return []
+    variants: list[str] = []
+    candidates = [str(symbol).strip().upper()]
+    if "/" in candidates[0]:
+        candidates.append(candidates[0].replace("/", ""))
+    elif len(candidates[0]) == 6 and candidates[0].isalpha():
+        candidates.append(f"{candidates[0][:3]}/{candidates[0][3:]}")
+    for candidate in candidates:
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def benchmark_symbol_candidates(asset_class: str) -> list[str]:
+    """Return benchmark symbols in priority order, including DB naming variants."""
+    candidates: list[str] = []
+    for raw_symbol in (
+        BENCHMARK_SYMBOLS.get(asset_class),
+        BENCHMARK_FALLBACKS.get(asset_class),
+    ):
+        for variant in _symbol_variants(raw_symbol):
+            if variant not in candidates:
+                candidates.append(variant)
+    return candidates
 
 
 def _safe_number(value: float, default: float = 0.0) -> float:

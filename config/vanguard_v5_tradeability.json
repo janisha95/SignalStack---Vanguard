@@ -1,0 +1,26 @@
+{
+  "schema_version": "v5_tradeability_v1",
+  "defaults": {
+    "thresholds": {
+      "max_spread_ratio_vs_baseline": 3.0,
+      "min_after_cost_pips": 0.2
+    },
+    "buffers": {
+      "slippage_buffer_pips": 0.2,
+      "commission_buffer_pips": 0.0
+    }
+  },
+  "asset_classes": {
+    "forex": {},
+    "crypto": {
+      "thresholds": {
+        "max_spread_bps": 75.0,
+        "min_after_cost_bps": 1.0
+      },
+      "buffers": {
+        "slippage_buffer_bps": 5.0,
+        "commission_buffer_bps": 0.0
+      }
+    }
+  }
+}

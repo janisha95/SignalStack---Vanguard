@@ -35,6 +35,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vanguard.config.runtime_config import (
+    resolve_market_data_source_label,
+    get_profiles_config,
+    get_shadow_db_path,
+    get_universes_config,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -49,7 +56,7 @@ _FUTURES_CONFIG_CANDIDATES = (
     _REPO_ROOT / "docs" / "ftmo_universe_with_futures.json",
     _REPO_ROOT.parent / "ftmo_universe_with_futures.json",
 )
-_DB_PATH        = str(_REPO_ROOT / "data" / "vanguard_universe.db")
+_DB_PATH = get_shadow_db_path()
 
 # ---------------------------------------------------------------------------
 # Module-level state (loaded lazily)
@@ -83,12 +90,21 @@ def load_universes(config_path: str | Path = _DEFAULT_CONFIG) -> dict:
     dict with key "universes" mapping name → universe definition
     """
     global _universes, _asset_class_map
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Universe config not found: {config_path}")
-    with config_path.open() as f:
-        data = json.load(f)
-    _universes = data.get("universes", {})
+    if Path(config_path) == Path(_DEFAULT_CONFIG):
+        config_path = Path(config_path)
+        legacy_data = {}
+        if config_path.exists():
+            with config_path.open() as f:
+                legacy_data = json.load(f).get("universes", {})
+        runtime_universes = get_universes_config()
+        _universes = {**legacy_data, **runtime_universes}
+    else:
+        config_path = Path(config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Universe config not found: {config_path}")
+        with config_path.open() as f:
+            data = json.load(f)
+        _universes = data.get("universes", {})
     _asset_class_map = None   # invalidate on reload
     logger.debug("Loaded %d universes from %s", len(_universes), config_path)
     return _universes
@@ -106,11 +122,34 @@ def _load_accounts(accounts_path: str | Path = _DEFAULT_ACCOUNTS) -> dict:
     """Load and cache the accounts config."""
     global _accounts
     if _accounts is None:
-        accounts_path = Path(accounts_path)
-        if not accounts_path.exists():
-            raise FileNotFoundError(f"Accounts config not found: {accounts_path}")
-        with accounts_path.open() as f:
-            _accounts = json.load(f)
+        if Path(accounts_path) == Path(_DEFAULT_ACCOUNTS):
+            accounts_path = Path(accounts_path)
+            merged_accounts: list[dict[str, Any]] = []
+            if accounts_path.exists():
+                with accounts_path.open() as f:
+                    merged_accounts.extend(list((json.load(f) or {}).get("accounts") or []))
+            seen = {str(acc.get("account_id") or "") for acc in merged_accounts}
+            for p in get_profiles_config():
+                account_id = str(p.get("id") or "")
+                if not account_id or account_id in seen:
+                    continue
+                prop_firm = str(p.get("prop_firm") or account_id.split("_", 1)[0]).lower()
+                merged_accounts.append(
+                    {
+                        "account_id": account_id,
+                        "prop_firm": prop_firm,
+                        "enabled": bool(p.get("is_active", True)),
+                        "execution_mode": p.get("execution_mode"),
+                        "execution_bridge": p.get("execution_bridge"),
+                    }
+                )
+            _accounts = {"accounts": merged_accounts}
+        else:
+            accounts_path = Path(accounts_path)
+            if not accounts_path.exists():
+                raise FileNotFoundError(f"Accounts config not found: {accounts_path}")
+            with accounts_path.open() as f:
+                _accounts = json.load(f)
     return _accounts
 
 
@@ -120,35 +159,57 @@ def _load_accounts(accounts_path: str | Path = _DEFAULT_ACCOUNTS) -> dict:
 
 def _build_asset_class_map() -> dict[str, str]:
     """
-    Build {symbol.upper() → asset_class} from static universe sections.
-    Equity universe is dynamic — equity symbols are not listed here.
-    Symbols in multiple universes use the first match (FTMO wins over TopStep
-    for overlapping futures, but TopStep is listed separately anyway).
+    Build {symbol.upper() → asset_class} reverse lookup.
+
+    Priority (highest first):
+    1. Runtime config universes (gft_universe and any other JSON-configured
+       universe). This is authoritative for all GFT symbols.
+    2. FTMO CFD legacy static universe (ftmo_cfd).
+    3. TopStep futures legacy static universe (topstep_futures).
+
+    Equity universe is dynamic — equity symbols are not enumerated here.
     """
     global _asset_class_map
     if _asset_class_map is not None:
         return _asset_class_map
 
-    universes = _ensure_loaded()
     mapping: dict[str, str] = {}
 
-    # FTMO CFDs
+    # ── 1. Runtime config universes (authoritative for GFT and any JSON-defined universe) ──
+    try:
+        from vanguard.config.runtime_config import get_runtime_config
+        rt_universes = get_runtime_config().get("universes") or {}
+        for universe_def in rt_universes.values():
+            symbols_by_class = universe_def.get("symbols") or {}
+            if not isinstance(symbols_by_class, dict):
+                continue
+            for asset_class, symbol_list in symbols_by_class.items():
+                if not isinstance(symbol_list, list):
+                    continue
+                for sym in symbol_list:
+                    mapping[str(sym).upper()] = str(asset_class)
+    except Exception as exc:
+        logger.warning("_build_asset_class_map: could not load runtime config: %s", exc)
+
+    # ── 2. FTMO CFDs (legacy; don't overwrite runtime-config entries) ──
+    universes = _ensure_loaded()
     ftmo = universes.get("ftmo_cfd", {})
     ftmo_instruments = ftmo.get("instruments", {})
     for asset_class, symbols in ftmo_instruments.items():
-        # equity_cfd → "equity", everything else → as-is
         ac = "equity" if asset_class == "equity_cfd" else asset_class
         for sym in symbols:
-            mapping[sym.upper()] = ac
+            s = sym.upper()
+            if s not in mapping:
+                mapping[s] = ac
 
-    # TopStep futures
+    # ── 3. TopStep futures (legacy; don't overwrite) ──
     ts = universes.get("topstep_futures", {})
     ts_instruments = ts.get("instruments", {})
     for asset_class, contracts in ts_instruments.items():
         for contract in contracts:
-            sym = contract["symbol"].upper()
-            if sym not in mapping:   # don't overwrite FTMO if overlap
-                mapping[sym] = asset_class
+            s = contract["symbol"].upper()
+            if s not in mapping:
+                mapping[s] = asset_class
 
     _asset_class_map = mapping
     return _asset_class_map
@@ -181,7 +242,12 @@ def get_universe(universe_name: str) -> list:
                        f"Available: {sorted(universes.keys())}")
 
     if universe_name == "ttp_equity":
-        return list(universes[universe_name].get("filter_rules", {}).keys())
+        rules = (
+            universes[universe_name].get("filter_rules")
+            or universes[universe_name].get("filters")
+            or {}
+        )
+        return list(rules.keys())
 
     if universe_name == "ftmo_cfd":
         return get_ftmo_universe()
@@ -191,7 +257,9 @@ def get_universe(universe_name: str) -> list:
 
     # Generic fallback: return whatever is in "instruments" as a flat list
     u = universes[universe_name]
-    instruments = u.get("instruments", {})
+    instruments = u.get("instruments") or u.get("symbols") or {}
+    if isinstance(instruments, list):
+        return list(instruments)
     result = []
     for items in instruments.values():
         if items and isinstance(items[0], dict):
@@ -216,7 +284,8 @@ def get_equity_universe(alpaca_adapter: Any | None = None) -> list[str]:
     list of uppercase ticker strings
     """
     universes = _ensure_loaded()
-    rules = universes.get("ttp_equity", {}).get("filter_rules", {})
+    ttp_config = universes.get("ttp_equity", {})
+    rules = ttp_config.get("filter_rules") or ttp_config.get("filters") or {}
 
     min_price    = rules.get("min_price",     2.0)
     min_avg_vol  = rules.get("min_avg_volume", 500_000)
@@ -250,7 +319,9 @@ def get_ftmo_universe() -> list[str]:
     """
     universes = _ensure_loaded()
     ftmo = universes.get("ftmo_cfd", {})
-    instruments = ftmo.get("instruments", {})
+    instruments = ftmo.get("instruments") or ftmo.get("symbols") or {}
+    if isinstance(instruments, list):
+        return [s.upper() for s in instruments]
 
     symbols: list[str] = []
     for _asset_class, syms in instruments.items():
@@ -360,9 +431,27 @@ def classify_asset_class(symbol: str) -> str:
     -------
     asset class string; defaults to "equity" for unknown symbols
     """
-    sym = symbol.upper()
-    mapping = _build_asset_class_map()
+    # Canonicalize: strip broker suffix (.x, .X), slashes
+    sym = (
+        str(symbol).upper()
+        .replace("/", "")
+        .replace(".X", "")
+        .replace(".x", "")
+    )
+    if sym.startswith("XAU") or sym.startswith("XAG") or sym.startswith("XPT") or sym.startswith("XPD"):
+        return "metal"
+    if sym in {"USOIL.CASH", "UKOIL.CASH", "NATGAS.CASH", "BRENT", "WTI", "CL", "NG", "QM"}:
+        return "energy"
+    if sym.endswith(".CASH") or sym in {"SPX500", "NAS100", "US30", "GER40", "UK100", "JAP225", "AUS200"}:
+        return "index"
+    if sym.endswith(".C") or sym in {"CORN", "SOYBEAN", "WHEAT", "SUGAR", "COCOA", "COFFEE"}:
+        return "agriculture"
+    if sym in {"ZB", "ZN", "ZF", "ZT", "UB"}:
+        return "interest_rate"
+    if sym in {"6E", "6B", "6J", "6A", "6C", "6N", "6S", "M6E", "M6A", "M6B", "M6J"}:
+        return "forex"
 
+    mapping = _build_asset_class_map()
     if sym in mapping:
         return mapping[sym]
 
@@ -370,10 +459,8 @@ def classify_asset_class(symbol: str) -> str:
     if "USD" in sym and len(sym) == 6:
         # 6-char FX pair like EURUSD, GBPUSD
         return "forex"
-    if sym.endswith(".CASH") or sym.endswith(".C") or sym in ("ES", "NQ", "YM", "RTY"):
+    if sym in ("ES", "NQ", "YM", "RTY"):
         return "index"
-    if sym.startswith("XAU") or sym.startswith("XAG") or sym.startswith("XPT"):
-        return "metal"
     if sym.startswith("BTC") or sym.startswith("ETH") or sym.endswith("USD") and len(sym) > 6:
         return "crypto"
 
@@ -399,7 +486,8 @@ def get_health_thresholds(universe_name: str) -> dict:
     dict of threshold values
     """
     universes = _ensure_loaded()
-    u = universes.get(universe_name, {})
+    clean_name = str(universe_name or "").split("(", 1)[0]
+    u = universes.get(universe_name, {}) or universes.get(clean_name, {})
     defaults = universes.get("ttp_equity", {}).get("health_thresholds", {})
     thresholds = u.get("health_thresholds", {})
     # Merge: universe-specific values override defaults
@@ -429,6 +517,13 @@ def load_futures_config() -> dict[str, Any] | None:
     return None
 
 
+def _runtime_data_source_for_asset_class(asset_class: str, *, fallback: str = "unknown") -> str:
+    resolved = resolve_market_data_source_label(asset_class)
+    if resolved and resolved != "unknown":
+        return resolved
+    return fallback
+
+
 def _parse_money_value(value: Any) -> float | None:
     """Convert '$12.50/tick' style metadata into a float."""
     if value is None:
@@ -453,62 +548,79 @@ def materialize_universe_members(
     db: Any,
     now_utc_str: str | None = None,
     alpaca_adapter: Any | None = None,
+    skip_equity: bool = False,
+    equity_symbols_override: list[str] | None = None,
 ) -> int:
     """
     Populate vanguard_universe_members from all configured sources.
 
     Live rows:
-      - Alpaca equities
+      - Alpaca equities (skipped when skip_equity=True or overridden by equity_symbols_override)
       - Twelve Data non-equities
     Staged rows:
       - Futures from ftmo_universe_with_futures.json (inactive)
+
+    Parameters
+    ----------
+    skip_equity             : When True, skip the Alpaca equity fetch entirely (Bug 9: OOS).
+    equity_symbols_override : When set, use this explicit list instead of calling Alpaca (Bug 9: enforce mode).
     """
     if now_utc_str is None:
         now_utc_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     rows: list[dict] = []
 
-    try:
-        equity_symbols = get_equity_universe(alpaca_adapter)
-    except Exception as exc:
-        logger.warning(
-            "materialize_universe_members: dynamic equity fetch failed (%s) — "
-            "falling back to cached Alpaca symbols from DB",
-            exc,
+    if skip_equity:
+        equity_symbols: list[str] = []
+        logger.info("materialize_universe_members: equity skipped (skip_equity=True)")
+    elif equity_symbols_override is not None:
+        equity_symbols = [str(s).upper() for s in equity_symbols_override]
+        logger.info(
+            "materialize_universe_members: using %d override equity symbols (enforce mode)",
+            len(equity_symbols),
         )
-        with db.connect() as conn:
-            cached = conn.execute(
-                """
-                SELECT symbol
-                FROM vanguard_universe_members
-                WHERE data_source = 'alpaca' AND is_active = 1
-                ORDER BY symbol
-                """
-            ).fetchall()
-            if not cached:
-                latest_cycle = conn.execute(
-                    "SELECT MAX(cycle_ts_utc) FROM vanguard_health"
-                ).fetchone()[0]
-                if latest_cycle:
-                    cached = conn.execute(
-                        """
-                        SELECT symbol
-                        FROM vanguard_health
-                        WHERE cycle_ts_utc = ? AND status = 'ACTIVE'
-                        ORDER BY symbol
-                        """,
-                        (latest_cycle,),
-                    ).fetchall()
-            if not cached:
+    else:
+        try:
+            equity_symbols = get_equity_universe(alpaca_adapter)
+        except Exception as exc:
+            logger.warning(
+                "materialize_universe_members: dynamic equity fetch failed (%s) — "
+                "falling back to cached Alpaca symbols from DB",
+                exc,
+            )
+            with db.connect() as conn:
                 cached = conn.execute(
                     """
-                    SELECT DISTINCT symbol
-                    FROM vanguard_bars_5m
-                    WHERE asset_class = 'equity' AND data_source = 'alpaca'
+                    SELECT symbol
+                    FROM vanguard_universe_members
+                    WHERE data_source = 'alpaca' AND is_active = 1
                     ORDER BY symbol
                     """
                 ).fetchall()
-        equity_symbols = [row[0] for row in cached]
+                if not cached:
+                    latest_cycle = conn.execute(
+                        "SELECT MAX(cycle_ts_utc) FROM vanguard_health"
+                    ).fetchone()[0]
+                    if latest_cycle:
+                        cached = conn.execute(
+                            """
+                            SELECT symbol
+                            FROM vanguard_health
+                            WHERE cycle_ts_utc = ? AND status = 'ACTIVE'
+                            ORDER BY symbol
+                            """,
+                            (latest_cycle,),
+                        ).fetchall()
+                if not cached:
+                    cached = conn.execute(
+                        """
+                        SELECT DISTINCT symbol
+                        FROM vanguard_bars_5m
+                        WHERE asset_class = 'equity' AND data_source = 'alpaca'
+                        ORDER BY symbol
+                        """
+                    ).fetchall()
+            equity_symbols = [row[0] for row in cached]
 
     for symbol in equity_symbols:
         rows.append({
@@ -527,11 +639,12 @@ def materialize_universe_members(
 
     td_groups = load_twelvedata_symbols()
     for asset_class, symbols in td_groups.items():
+        data_source = _runtime_data_source_for_asset_class(asset_class, fallback="twelvedata")
         for symbol in symbols:
             rows.append({
                 "symbol": str(symbol).upper(),
                 "asset_class": asset_class,
-                "data_source": "twelvedata",
+                "data_source": data_source,
                 "universe": f"ftmo_{asset_class}",
                 "exchange": None,
                 "session_start": None,
@@ -633,10 +746,11 @@ def refresh_to_db(
         instruments = universes.get("ftmo_cfd", {}).get("instruments", {})
         for asset_class, syms in instruments.items():
             ac = "equity" if asset_class == "equity_cfd" else asset_class
+            data_source = _runtime_data_source_for_asset_class(ac, fallback="twelvedata")
             for sym in syms:
                 rows.append({
                     "symbol":             sym.upper(),
-                    "data_source":        "twelvedata",
+                    "data_source":        data_source,
                     "universe":           universe_name,
                     "asset_class":        ac,
                     "tick_size":          None,

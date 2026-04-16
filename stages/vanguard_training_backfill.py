@@ -60,7 +60,8 @@ from vanguard.factors import (
 )
 from vanguard.features.feature_computer import (
     FEATURE_NAMES as SHARED_FEATURE_NAMES,
-    compute_all_features,
+    benchmark_symbol_candidates,
+    compute_feature_dict,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,17 +81,22 @@ logger = logging.getLogger("vanguard_training_backfill")
 
 DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "vanguard_universe.db")
 
-SPY_SYMBOL           = "SPY"
-BARS_5M_LIMIT        = 50_000   # max 5m bars per symbol (~16 months at 78/day)
-BARS_1H_LIMIT        = 2_000    # max 1h bars per symbol
+BARS_5M_LIMIT        = 50_000   # default cap when no explicit date window is requested
+BARS_1H_LIMIT        = 2_000    # default cap when no explicit date window is requested
 BARS_LOOKBACK        = 200      # sliding window size for feature computation
 MIN_BARS_FOR_FEATURE = 20       # skip bars with fewer than this in context
 WARM_UP_SESSION_BARS = 15       # bars_since_session_open < 15 → warm_up = 1
 BATCH_WRITE_SIZE     = 2_000    # rows per DB write batch
+BENCHMARK_LOOKBACK   = 96       # market_context uses <=60 bars; keep some cushion
+HTF_1H_LOOKBACK      = 32       # smc_htf_1h uses small windows; keep modest cushion
 
 DEFAULT_HORIZON_BARS = 6
 DEFAULT_TP_MULT      = 2.0
 DEFAULT_SL_MULT      = 1.0
+# Backward-compat aliases kept for older tests and callers that still import
+# pct-style names from the pre-multiplier TBM interface.
+DEFAULT_TP_PCT       = DEFAULT_TP_MULT
+DEFAULT_SL_PCT       = DEFAULT_SL_MULT
 TBM_CONFIG_PATH      = Path(__file__).resolve().parent.parent / "config" / "vanguard_tbm_params.json"
 
 # ---------------------------------------------------------------------------
@@ -120,6 +126,27 @@ def load_tbm_params_map(config_path: str | Path | None = None) -> dict[str, dict
         data = json.load(fh)
     return {str(asset_class): dict(params) for asset_class, params in data.items()}
 
+
+def _load_benchmark_rows(
+    db: VanguardDB,
+    asset_class: str,
+    *,
+    limit: int | None,
+    start_ts_utc: str | None = None,
+    end_ts_utc: str | None = None,
+) -> list[dict]:
+    for candidate in benchmark_symbol_candidates(asset_class):
+        rows = db.get_bars_for_symbol(
+            candidate,
+            table="vanguard_bars_5m",
+            limit=limit,
+            start_ts_utc=start_ts_utc,
+            end_ts_utc=end_ts_utc,
+        )
+        if rows:
+            return rows
+    return []
+
 # ---------------------------------------------------------------------------
 # Eastern Time helpers (DST-aware, no pytz)
 # ---------------------------------------------------------------------------
@@ -142,13 +169,33 @@ def _to_et(dt_utc: datetime) -> datetime:
     return (dt_utc + timedelta(hours=_et_offset(dt_utc))).replace(tzinfo=None)
 
 
-def _session_id(bar_ts_utc: str) -> str | None:
+def _session_id(bar_ts_utc: str, asset_class: str = "equity") -> str | None:
     """
-    Return 'YYYY-MM-DD' ET date if bar is within regular US equity session
-    (09:30 – 16:00 ET), else None.
+    Return a trading-session id for the bar timestamp.
+
+    - equities: regular US cash session only (09:30–16:00 ET)
+    - forex: 24/5 session with ET 17:00 rollover
     """
     dt = datetime.fromisoformat(bar_ts_utc.replace("Z", "+00:00"))
     et = _to_et(dt)
+
+    if asset_class == "forex":
+        # Exclude the weekend closure window:
+        # Friday 17:00 ET -> Sunday 17:00 ET.
+        weekday = et.weekday()  # Mon=0 ... Sun=6
+        if weekday == 5:
+            return None
+        if weekday == 4 and et.hour >= 17:
+            return None
+        if weekday == 6 and et.hour < 17:
+            return None
+
+        # Forex trading day rolls at 17:00 ET.
+        trading_day = et.date()
+        if et.hour >= 17:
+            trading_day += timedelta(days=1)
+        return trading_day.isoformat()
+
     h, m = et.hour, et.minute
     if (h > 9 or (h == 9 and m >= 30)) and h < 16:
         return et.strftime("%Y-%m-%d")
@@ -297,29 +344,15 @@ def _compute_features(
     asset_class: str = "equity",
     symbol: str = "",
 ) -> dict[str, float]:
-    """Run all 8 factor modules; overwrite nan_ratio placeholder after."""
-    shared_df = df_5m.copy()
-    shared_df.attrs["df_1h"] = df_1h
-    shared_df.attrs["benchmark_df"] = spy_df
-    shared_df.attrs["asset_class"] = asset_class
-    shared_df.attrs["symbol"] = symbol
-    shared_df.attrs["fillna_zero"] = True
-    features = compute_all_features(shared_df)
-    return features.iloc[0].to_dict() if not features.empty else {}
-
-    combined: dict[str, float] = {}
-    for mod in _FACTOR_MODULES:
-        try:
-            combined.update(mod.compute(df_5m, df_1h, spy_df))
-        except Exception:
-            for name in getattr(mod, "FEATURE_NAMES", []):
-                combined.setdefault(name, float("nan"))
-    if "nan_ratio" in combined:
-        nan_count = sum(
-            1 for v in combined.values() if isinstance(v, float) and math.isnan(v)
-        )
-        combined["nan_ratio"] = round(nan_count / len(combined), 6) if combined else 0.0
-    return combined
+    """Run the shared feature contract for one context window."""
+    return compute_feature_dict(
+        df_5m,
+        df_1h=df_1h,
+        benchmark_df=spy_df,
+        asset_class=asset_class,
+        symbol=symbol,
+        fillna_zero=True,
+    )
 
 
 def _nan_to_none(v: Any) -> Any:
@@ -347,16 +380,39 @@ def _get_resume_ts(db: VanguardDB, symbol: str, horizon_bars: int) -> str | None
 
 def _delete_symbol_rows(db: VanguardDB, symbol: str, horizon_bars: int) -> int:
     """Delete all training rows for symbol + horizon_bars. Returns row count."""
-    conn = db.connect()
-    try:
-        cur = conn.execute(
-            "DELETE FROM vanguard_training_data WHERE symbol = ? AND horizon_bars = ?",
-            (symbol, horizon_bars),
-        )
-        conn.commit()
-        return cur.rowcount
-    finally:
-        conn.close()
+    last_exc: Exception | None = None
+    for attempt in range(1, 13):
+        conn = db.connect()
+        try:
+            cur = conn.execute(
+                "DELETE FROM vanguard_training_data WHERE symbol = ? AND horizon_bars = ?",
+                (symbol, horizon_bars),
+            )
+            conn.commit()
+            return cur.rowcount
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            if (
+                "database is locked" not in msg
+                and "database table is locked" not in msg
+                and "busy" not in msg
+            ) or attempt == 12:
+                raise
+            sleep_s = min(5.0, 0.5 * attempt)
+            logger.warning(
+                "SQLite contention deleting symbol rows for %s (attempt %d/12): %s; sleeping %.1fs",
+                symbol,
+                attempt,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+        finally:
+            conn.close()
+    if last_exc:
+        raise last_exc
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +437,19 @@ def _worker(args: tuple) -> dict:
 
     db = VanguardDB(db_path)
 
-    # Load SPY once per worker (readonly — WAL concurrent reads are safe)
-    spy_rows = db.get_bars_for_symbol(SPY_SYMBOL, table="vanguard_bars_5m", limit=BARS_5M_LIMIT)
-    spy_df = pd.DataFrame(spy_rows) if spy_rows else pd.DataFrame()
+    start_ts_utc = f"{opts['start_date']}T00:00:00Z" if opts.get("start_date") else None
+    end_ts_utc = f"{opts['end_date']}T23:59:59Z" if opts.get("end_date") else None
+    history_limit_5m = None if (start_ts_utc or end_ts_utc) else BARS_5M_LIMIT
+    history_limit_1h = None if (start_ts_utc or end_ts_utc) else BARS_1H_LIMIT
+
+    benchmark_rows = _load_benchmark_rows(
+        db,
+        str(opts.get("asset_class") or "equity"),
+        limit=history_limit_5m,
+        start_ts_utc=start_ts_utc,
+        end_ts_utc=end_ts_utc,
+    )
+    spy_df = pd.DataFrame(benchmark_rows) if benchmark_rows else pd.DataFrame()
     if not spy_df.empty:
         spy_df.sort_values("bar_ts_utc", inplace=True)
         spy_df.reset_index(drop=True, inplace=True)
@@ -396,16 +462,42 @@ def _worker(args: tuple) -> dict:
     }
 
     for symbol in symbols:
+        symbol_t0 = time.perf_counter()
+        symbol_rows_written = 0
         try:
+            logger.info("Symbol start | asset_class=%s | symbol=%s", opts.get("asset_class"), symbol)
             bars_5m_rows = db.get_bars_for_symbol(
-                symbol, table="vanguard_bars_5m", limit=BARS_5M_LIMIT
+                symbol,
+                table="vanguard_bars_5m",
+                limit=history_limit_5m,
+                start_ts_utc=start_ts_utc,
+                end_ts_utc=end_ts_utc,
             )
             if not bars_5m_rows:
                 stats["symbols_skipped"] += 1
+                logger.warning(
+                    "Symbol skipped | asset_class=%s | symbol=%s | reason=no_5m_bars",
+                    opts.get("asset_class"),
+                    symbol,
+                )
                 continue
 
             bars_1h_rows = db.get_bars_for_symbol(
-                symbol, table="vanguard_bars_1h", limit=BARS_1H_LIMIT
+                symbol,
+                table="vanguard_bars_1h",
+                limit=history_limit_1h,
+                start_ts_utc=start_ts_utc,
+                end_ts_utc=end_ts_utc,
+            )
+
+            logger.info(
+                "Symbol bars loaded | asset_class=%s | symbol=%s | bars_5m=%d | bars_1h=%d | start_5m=%s | end_5m=%s",
+                opts.get("asset_class"),
+                symbol,
+                len(bars_5m_rows),
+                len(bars_1h_rows),
+                bars_5m_rows[0]["bar_ts_utc"] if bars_5m_rows else None,
+                bars_5m_rows[-1]["bar_ts_utc"] if bars_5m_rows else None,
             )
 
             df_5m = pd.DataFrame(bars_5m_rows)
@@ -417,22 +509,39 @@ def _worker(args: tuple) -> dict:
                 df_1h = pd.DataFrame(bars_1h_rows)
                 df_1h.sort_values("bar_ts_utc", inplace=True)
                 df_1h.reset_index(drop=True, inplace=True)
+                df_1h_ts = df_1h["bar_ts_utc"].to_numpy()
             else:
                 df_1h = None
+                df_1h_ts = None
 
             bars_list = df_5m.to_dict("records")
             n         = len(bars_list)
+            ts_5m     = df_5m["bar_ts_utc"].to_numpy()
+            spy_ts    = spy_df["bar_ts_utc"].to_numpy() if not spy_df.empty else None
 
             # Resume / full-rebuild
             if opts.get("full_rebuild"):
                 if not opts.get("dry_run"):
-                    _delete_symbol_rows(db, symbol, horizon_bars)
+                    deleted = _delete_symbol_rows(db, symbol, horizon_bars)
+                    logger.info(
+                        "Symbol reset | asset_class=%s | symbol=%s | deleted_rows=%d | horizon=%d",
+                        opts.get("asset_class"),
+                        symbol,
+                        deleted,
+                        horizon_bars,
+                    )
                 resume_after: str | None = None
             else:
                 resume_after = _get_resume_ts(db, symbol, horizon_bars)
 
-            # Pre-compute session IDs for every bar
-            session_ids = [_session_id(b["bar_ts_utc"]) for b in bars_list]
+            # Pre-compute session IDs for every bar using the asset-class contract.
+            session_ids = [
+                _session_id(
+                    b["bar_ts_utc"],
+                    asset_class=str(opts.get("asset_class") or "equity"),
+                )
+                for b in bars_list
+            ]
 
             # session_end_idx: sid → index of last in-session bar for that day
             session_end_idx: dict[str, int] = {}
@@ -451,7 +560,7 @@ def _worker(args: tuple) -> dict:
             for i in range(n):
                 sid = session_ids[i]
                 if sid is None:
-                    continue  # pre/post-market bar
+                    continue  # out-of-session bar
 
                 ts = bars_list[i]["bar_ts_utc"]
 
@@ -471,13 +580,26 @@ def _worker(args: tuple) -> dict:
 
                 # ---- Sliding-window feature computation ----
                 lo_idx   = max(0, i - BARS_LOOKBACK + 1)
-                df_slice = df_5m.iloc[lo_idx : i + 1].copy()
-                df_slice.reset_index(drop=True, inplace=True)
+                df_slice = df_5m.iloc[lo_idx : i + 1]
+
+                if df_1h is not None and df_1h_ts is not None:
+                    h_end = int(np.searchsorted(df_1h_ts, ts, side="right"))
+                    h_start = max(0, h_end - HTF_1H_LOOKBACK)
+                    df_1h_slice = df_1h.iloc[h_start:h_end]
+                else:
+                    df_1h_slice = None
+
+                if spy_ts is not None:
+                    b_end = int(np.searchsorted(spy_ts, ts, side="right"))
+                    b_start = max(0, b_end - BENCHMARK_LOOKBACK)
+                    spy_slice = spy_df.iloc[b_start:b_end]
+                else:
+                    spy_slice = spy_df
 
                 features = _compute_features(
                     df_slice,
-                    df_1h,
-                    spy_df,
+                    df_1h_slice,
+                    spy_slice,
                     asset_class=asset_class,
                     symbol=symbol,
                 )
@@ -520,6 +642,14 @@ def _worker(args: tuple) -> dict:
                     if not dry_run:
                         db.upsert_training_data(batch)
                     stats["rows_written"] += len(batch)
+                    symbol_rows_written += len(batch)
+                    logger.info(
+                        "Symbol batch flush | asset_class=%s | symbol=%s | rows_written=%d | last_ts=%s",
+                        opts.get("asset_class"),
+                        symbol,
+                        symbol_rows_written,
+                        batch[-1]["asof_ts_utc"],
+                    )
                     batch.clear()
 
             # Flush remaining
@@ -527,11 +657,33 @@ def _worker(args: tuple) -> dict:
                 if not dry_run:
                     db.upsert_training_data(batch)
                 stats["rows_written"] += len(batch)
+                symbol_rows_written += len(batch)
+                logger.info(
+                    "Symbol batch flush | asset_class=%s | symbol=%s | rows_written=%d | last_ts=%s",
+                    opts.get("asset_class"),
+                    symbol,
+                    symbol_rows_written,
+                    batch[-1]["asof_ts_utc"],
+                )
 
             stats["symbols_processed"] += 1
+            logger.info(
+                "Symbol done | asset_class=%s | symbol=%s | rows=%d | elapsed=%.1fs",
+                opts.get("asset_class"),
+                symbol,
+                symbol_rows_written,
+                time.perf_counter() - symbol_t0,
+            )
 
         except Exception as exc:
-            stats["errors"].append(f"{symbol}: {exc}")
+            err = f"{symbol}: {exc}"
+            stats["errors"].append(err)
+            logger.exception(
+                "Symbol failed | asset_class=%s | symbol=%s | rows_before_failure=%d",
+                opts.get("asset_class"),
+                symbol,
+                symbol_rows_written,
+            )
 
     return stats
 

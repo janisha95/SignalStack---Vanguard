@@ -1,11 +1,15 @@
 """
-s1_adapter.py — Read-only adapter for S1 (SignalStack) scorer_predictions.
+s1_adapter.py — Read-only adapter for S1 (SignalStack) daily_shortlist.
 
 Reads from:
-  ~/SS/Advance/data_cache/signalstack_results.db   (scorer_predictions table)
-  ~/SS/Advance/evening_results/convergence_*.json   (convergence data)
+  ~/SS/Advance/data_cache/signalstack_results.db   (daily_shortlist table — final truth)
+  ~/SS/Advance/evening_results/convergence_*.json   (convergence enrichment)
 
-Merges on (ticker, direction). Returns normalized candidate rows.
+daily_shortlist schema (confirmed 2026-04-06):
+  id, run_date, ticker, direction, scorer_prob, p_tp, nn_p_tp,
+  gate_source, strategy, regime, price, sector, rank, created_at
+
+Merges on (ticker, direction) with convergence JSON. Returns normalized candidate rows.
 
 Location: ~/SS/Vanguard/vanguard/api/adapters/s1_adapter.py
 """
@@ -146,7 +150,7 @@ def get_candidates(
     direction: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Load scorer_predictions merged with convergence data.
+    Load daily_shortlist (S1 final truth table) merged with convergence data.
 
     Parameters
     ----------
@@ -167,11 +171,11 @@ def get_candidates(
         try:
             if run_date is None:
                 row = con.execute(
-                    "SELECT MAX(run_date) AS d FROM scorer_predictions"
+                    "SELECT MAX(run_date) AS d FROM daily_shortlist"
                 ).fetchone()
                 run_date = row["d"] if row and row["d"] else str(date_type.today())
 
-            # Dedup: one row per (ticker, direction) using best scorer_prob
+            # daily_shortlist is already deduped (one row per ticker per run_date)
             query = """
                 SELECT ticker,
                        CASE
@@ -179,15 +183,16 @@ def get_candidates(
                            WHEN UPPER(direction) = 'SELL' THEN 'SHORT'
                            ELSE UPPER(direction)
                        END AS direction,
-                       MAX(scorer_prob)  AS scorer_prob,
-                       MAX(p_tp)         AS p_tp,
-                       MAX(nn_p_tp)      AS nn_p_tp,
-                       MAX(price)        AS price,
-                       MAX(regime)       AS regime,
-                       MAX(sector)       AS sector,
-                       MAX(gate_source)  AS gate_source,
-                       GROUP_CONCAT(strategy) AS strategies_raw
-                FROM   scorer_predictions
+                       scorer_prob,
+                       p_tp,
+                       nn_p_tp,
+                       price,
+                       regime,
+                       sector,
+                       gate_source,
+                       strategy,
+                       rank
+                FROM   daily_shortlist
                 WHERE  run_date = ?
             """
             params: list[Any] = [run_date]
@@ -196,7 +201,7 @@ def get_candidates(
                     query += " AND UPPER(direction) IN ('LONG', 'BUY')"
                 else:
                     query += " AND UPPER(direction) IN ('SHORT', 'SELL')"
-            query += " GROUP BY ticker, CASE WHEN UPPER(direction) = 'BUY' THEN 'LONG' WHEN UPPER(direction) = 'SELL' THEN 'SHORT' ELSE UPPER(direction) END ORDER BY scorer_prob DESC"
+            query += " ORDER BY scorer_prob DESC"
 
             rows = con.execute(query, params).fetchall()
         finally:
@@ -232,7 +237,7 @@ def get_candidates(
             assigned_longs.add(ticker)
 
         row: dict[str, Any] = {
-            "row_id":  f"s1:{ticker}:{dir_upper}:{run_date}:scorer",
+            "row_id":  f"s1:{ticker}:{dir_upper}:{run_date}:shortlist",
             "source":  "s1",
             "symbol":  ticker,
             "side":    dir_upper,
@@ -243,9 +248,9 @@ def get_candidates(
             "regime":  (r["regime"] or "").upper(),
             "partial_data": bool(not conv_data) or price_is_fallback,
             "provenance": {
-                "base":         "scorer_predictions",
+                "base":         "daily_shortlist",
                 "convergence":  "primary" if conv_data else "missing",
-                "price_source": "daily_bars_fallback" if price_is_fallback else "scorer_predictions",
+                "price_source": "daily_bars_fallback" if price_is_fallback else "daily_shortlist",
             },
             "lane_status": "live",
             "readiness":   "live",
@@ -255,7 +260,7 @@ def get_candidates(
             "scorer_prob":        sp,
             "convergence_score":  cs,
             "n_strategies_agree": n_agree,
-            "strategy":           r["gate_source"] or "",
+            "strategy":           r["gate_source"] or r["strategy"] or "",
             "volume_ratio":       vol_ratio,
             # Nested native dict (for detail endpoint)
             "native": {
@@ -264,9 +269,10 @@ def get_candidates(
                 "scorer_prob":        sp,
                 "convergence_score":  cs,
                 "n_strategies_agree": n_agree,
-                "strategy":           r["gate_source"] or "",
+                "strategy":           r["gate_source"] or r["strategy"] or "",
                 "volume_ratio":       vol_ratio,
                 "strategies":         strategies_list,
+                "rank":               int(r["rank"] or 0),
             },
         }
         result.append(row)
@@ -276,14 +282,14 @@ def get_candidates(
 
 
 def get_latest_date() -> str | None:
-    """Return the most recent run_date in scorer_predictions, or None."""
+    """Return the most recent run_date in daily_shortlist, or None."""
     if not S1_DB.exists():
         return None
     try:
         con = sqlite3.connect(f"file:{S1_DB}?mode=ro", uri=True)
         try:
             row = con.execute(
-                "SELECT MAX(run_date) AS d FROM scorer_predictions"
+                "SELECT MAX(run_date) AS d FROM daily_shortlist"
             ).fetchone()
             return row[0] if row and row[0] else None
         finally:

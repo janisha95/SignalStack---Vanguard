@@ -16,12 +16,15 @@ import json
 import logging
 import os
 import sqlite3
+from contextlib import asynccontextmanager
 from datetime import date as date_type, datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+import httpx
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .field_registry import FIELD_REGISTRY
@@ -30,8 +33,14 @@ from . import trade_desk as td_module
 from . import reports as rpt_module
 from . import accounts as acc_module
 from .adapters import meridian_adapter, s1_adapter, vanguard_adapter
+from vanguard.config.runtime_config import (
+    get_runtime_config,
+    get_shadow_db_path,
+    save_runtime_config,
+)
 from vanguard.helpers.clock import now_et
 from vanguard.helpers.db import sqlite_conn
+from vanguard.helpers.universe_builder import classify_asset_class
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +48,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("unified_api")
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "vanguard_universe.db"
+_DB_PATH = Path(get_shadow_db_path())
+_RISKY_BASE_URL = "http://127.0.0.1:8092"
+_RISKY_TIMEOUT_SECONDS = 2.0
+_RISKY_STARTUP_TIMEOUT_SECONDS = 1.0
 _ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -50,10 +62,50 @@ _ALLOWED_ORIGINS = [
     "https://signalstack-app.vercel.app",
 ]
 
+
+class RiskyUnavailableError(RuntimeError):
+    """Raised when the local Risky service cannot be reached."""
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize local tables plus the shared Risky client."""
+    app.state.risky_client = httpx.AsyncClient(
+        base_url=_RISKY_BASE_URL,
+        timeout=httpx.Timeout(_RISKY_TIMEOUT_SECONDS),
+    )
+
+    uv_module.init_table()
+    uv_module.seed_system_views()
+    td_module.init_table()
+    rpt_module.init_table()
+    acc_module.init_table()
+    acc_module.seed_profiles()
+    logger.info("Unified API started — DB tables ready")
+
+    try:
+        risky_health = await _fetch_risky_health(app, timeout=_RISKY_STARTUP_TIMEOUT_SECONDS)
+        logger.info(
+            "Risky reachable, config_version=%s, checks_enabled=%s",
+            risky_health.get("config_version"),
+            risky_health.get("checks_enabled"),
+        )
+    except RiskyUnavailableError as exc:
+        logger.warning("Risky health check failed at startup: %s", exc)
+    except Exception as exc:
+        logger.warning("Risky startup probe returned an unexpected error: %s", exc)
+
+    try:
+        yield
+    finally:
+        await app.state.risky_client.aclose()
+
+
 app = FastAPI(
     title="SignalStack Unified API",
     version="1.0.0",
     description="Unified candidate data from Meridian, S1, and Vanguard.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -63,19 +115,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    """Initialize DB tables and seed system views."""
-    uv_module.init_table()
-    uv_module.seed_system_views()
-    td_module.init_table()
-    rpt_module.init_table()
-    acc_module.init_table()
-    acc_module.seed_profiles()
-    logger.info("Unified API started — DB tables ready")
-
 
 def _get_config_value(name: str) -> str:
     """Read an env value directly, with `.env` fallback for local desktop runs."""
@@ -89,6 +128,155 @@ def _get_config_value(name: str) -> str:
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip()
     return ""
+
+
+def _risky_required() -> bool:
+    raw = (_get_config_value("RISKY_REQUIRED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _format_httpx_error(exc: Exception) -> str:
+    return str(exc) or exc.__class__.__name__
+
+
+async def _request_risky(
+    app: FastAPI,
+    method: str,
+    path: str,
+    *,
+    json_body: Any | None = None,
+    params: dict[str, Any] | None = None,
+    timeout: float | None = None,
+) -> httpx.Response:
+    client: httpx.AsyncClient = app.state.risky_client
+    try:
+        return await client.request(
+            method,
+            path,
+            json=json_body,
+            params=params,
+            timeout=timeout,
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise RiskyUnavailableError(_format_httpx_error(exc)) from exc
+
+
+async def _fetch_risky_health(
+    app: FastAPI,
+    *,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    response = await _request_risky(app, "GET", "/risk/health", timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    checks_enabled = payload.get("checks_enabled") or {}
+    enabled_count = sum(1 for enabled in checks_enabled.values() if enabled)
+    return {
+        "reachable": True,
+        "config_version": payload.get("config_version"),
+        "checks_enabled": enabled_count,
+        "mode": payload.get("mode"),
+        "raw": payload,
+    }
+
+
+async def _get_risky_status_snapshot(request: Request) -> dict[str, Any]:
+    try:
+        return await _fetch_risky_health(request.app)
+    except (RiskyUnavailableError, httpx.HTTPError) as exc:
+        logger.warning("system status Risky probe failed: %s", exc)
+        return {
+            "reachable": False,
+            "config_version": None,
+            "checks_enabled": None,
+            "mode": None,
+        }
+
+
+def _risky_unreachable_response(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"error": "risky_unreachable", "message": message},
+    )
+
+
+def _proxy_response_from_httpx(response: httpx.Response) -> Response:
+    media_type = response.headers.get("content-type", "application/json").split(";", 1)[0]
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=media_type,
+    )
+
+
+def _build_risky_order(trade: TradeItem, profile_id: str | None) -> dict[str, Any]:
+    qty = trade.quantity if trade.quantity is not None else trade.shares
+    return {
+        "symbol": trade.symbol.upper(),
+        "side": trade.direction.upper(),
+        "qty": float(qty),
+        "asset_class": classify_asset_class(trade.symbol),
+        "intended_entry": float(trade.entry_price or 0.0),
+        "intended_stop": float(trade.stop_loss or 0.0),
+        "account_id": profile_id or "default",
+    }
+
+
+def _collapse_risky_verdicts(verdicts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not verdicts:
+        return None
+    if len(verdicts) == 1:
+        return verdicts[0]
+    return {"batch": verdicts}
+
+
+async def _check_trades_with_risky(
+    request: Request,
+    trades: list[TradeItem],
+    profile_id: str | None,
+) -> list[dict[str, Any]] | JSONResponse:
+    verdicts: list[dict[str, Any]] = []
+    for trade in trades:
+        order_payload = _build_risky_order(trade, profile_id)
+        try:
+            response = await _request_risky(
+                request.app,
+                "POST",
+                "/risk/check",
+                json_body=order_payload,
+            )
+        except RiskyUnavailableError as exc:
+            if _risky_required():
+                return _risky_unreachable_response(str(exc))
+            logger.warning(
+                "Risky unreachable with RISKY_REQUIRED=false — proceeding without gating: %s",
+                exc,
+            )
+            return []
+
+        if response.status_code >= 400:
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json(),
+            )
+
+        verdict = response.json()
+        if not verdict.get("approved", False):
+            return JSONResponse(
+                status_code=422,
+                content={"status": "rejected_by_risky", "verdict": verdict},
+            )
+
+        logger.info(
+            "Risky approved %s %s severity=%s config_version=%s",
+            order_payload["side"],
+            order_payload["symbol"],
+            verdict.get("severity"),
+            verdict.get("config_version"),
+        )
+        verdicts.append(verdict)
+
+    return verdicts
 
 
 def _load_latest_session_log() -> dict[str, Any] | None:
@@ -238,7 +426,7 @@ async def health() -> dict[str, Any]:
 
 
 @app.get("/api/v1/system/status")
-async def system_status() -> dict[str, Any]:
+async def system_status(request: Request) -> dict[str, Any]:
     """Current backend/system status snapshot for the React shell."""
     mer_date = meridian_adapter.get_latest_date()
     mer_count = meridian_adapter.count_candidates(mer_date) if mer_date else 0
@@ -255,6 +443,7 @@ async def system_status() -> dict[str, Any]:
     session_row = _load_latest_session_log()
     webhook_url = _get_config_value("SIGNALSTACK_WEBHOOK_URL")
     tg_token = _get_config_value("TELEGRAM_BOT_TOKEN")
+    risky_status = await _get_risky_status_snapshot(request)
 
     source_health_latest = max(
         (str(r.get("last_updated")) for r in source_health_rows if r.get("last_updated")),
@@ -298,6 +487,56 @@ async def system_status() -> dict[str, Any]:
         },
         "source_health": source_health_rows,
         "session": session_row,
+        "risky": risky_status,
+    }
+
+
+@app.get("/api/v1/runtime/resolved-universe")
+async def get_resolved_universe() -> dict[str, Any]:
+    """Return the most recent resolved universe snapshot (Phase 2a debug endpoint)."""
+    import json as _json
+    try:
+        with sqlite3.connect(_DB_PATH) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                """
+                SELECT * FROM vanguard_resolved_universe_log
+                ORDER BY cycle_ts_utc DESC LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            return {"status": "no_data", "message": "No resolved universe log entries yet"}
+        d = dict(row)
+        # Parse JSON arrays stored as text
+        for col in ("active_profile_ids", "expected_asset_classes", "in_scope_symbols"):
+            try:
+                d[col] = _json.loads(d[col])
+            except Exception:
+                pass
+        return d
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/v1/config/runtime")
+async def get_runtime_config_endpoint() -> dict[str, Any]:
+    """Return the active QA/shadow runtime config snapshot."""
+    return {
+        "status": "ok",
+        "config": get_runtime_config(refresh=True),
+    }
+
+
+@app.put("/api/v1/config/runtime")
+async def put_runtime_config_endpoint(body: RuntimeConfigUpdate) -> dict[str, Any]:
+    """Validate and persist the QA/shadow runtime config document."""
+    try:
+        saved = save_runtime_config(body.config)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "config": saved,
     }
 
 
@@ -317,6 +556,106 @@ async def data_health() -> dict[str, Any]:
             "SELECT * FROM vanguard_source_health ORDER BY data_source, asset_class"
         ).fetchall()
     return {"sources": [dict(r) for r in rows]}
+
+
+# ── Daemon Heartbeat ──────────────────────────────────────────────────────────
+
+_LIFECYCLE_LOG   = Path("/tmp/vanguard_lifecycle_qa.log")
+_LIFECYCLE_PID   = Path("/tmp/vanguard_lifecycle_qa.pid")
+_LOG_WARN_SECS   = 300   # 5 min without log update → warn
+_LOG_DEAD_SECS   = 600   # 10 min without log update → not_alive
+_DB_WARN_SECS    = 300   # 5 min since last DB write → warn
+
+
+@app.get("/api/v1/daemon_health")
+async def daemon_health() -> dict[str, Any]:
+    """
+    Lifecycle daemon liveness check.
+
+    Returns:
+      alive        – process detected by PID file or pgrep
+      log_age_s    – seconds since lifecycle log was last written
+      db_age_s     – seconds since vanguard_account_state was last updated
+      status       – "ok" | "warn" | "dead"
+      detail       – human-readable summary
+    """
+    import subprocess
+    import time
+
+    now = time.time()
+
+    # ── 1. Process liveness ───────────────────────────────────────────────────
+    alive = False
+    live_pid: int | None = None
+
+    pid_str = _LIFECYCLE_PID.read_text().strip() if _LIFECYCLE_PID.exists() else ""
+    if pid_str.isdigit():
+        try:
+            os.kill(int(pid_str), 0)   # signal 0 = existence check only
+            alive = True
+            live_pid = int(pid_str)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    if not alive:
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "lifecycle_daemon"],
+                capture_output=True, text=True, timeout=3,
+            )
+            pids = [p.strip() for p in result.stdout.strip().splitlines() if p.strip().isdigit()]
+            if pids:
+                alive = True
+                live_pid = int(pids[0])
+        except Exception:
+            pass
+
+    # ── 2. Log freshness ──────────────────────────────────────────────────────
+    log_age_s: int | None = None
+    if _LIFECYCLE_LOG.exists():
+        log_age_s = int(now - _LIFECYCLE_LOG.stat().st_mtime)
+
+    # ── 3. DB freshness ───────────────────────────────────────────────────────
+    db_age_s: int | None = None
+    try:
+        with sqlite3.connect(_DB_PATH) as con:
+            row = con.execute(
+                "SELECT MAX(updated_at_utc) FROM vanguard_account_state"
+            ).fetchone()
+        if row and row[0]:
+            last_ts = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+            db_age_s = int(now - last_ts.timestamp())
+    except Exception:
+        pass
+
+    # ── 4. Derive status ──────────────────────────────────────────────────────
+    problems: list[str] = []
+    if not alive:
+        problems.append("process not found")
+    if log_age_s is not None and log_age_s > _LOG_DEAD_SECS:
+        problems.append(f"log silent for {log_age_s}s")
+    elif log_age_s is not None and log_age_s > _LOG_WARN_SECS:
+        problems.append(f"log stale for {log_age_s}s")
+    if db_age_s is not None and db_age_s > _DB_WARN_SECS:
+        problems.append(f"DB not updated for {db_age_s}s")
+
+    if not alive or (log_age_s is not None and log_age_s > _LOG_DEAD_SECS):
+        status = "dead"
+    elif problems:
+        status = "warn"
+    else:
+        status = "ok"
+
+    detail = "; ".join(problems) if problems else "all checks pass"
+
+    return {
+        "status":     status,
+        "alive":      alive,
+        "pid":        live_pid,
+        "log_age_s":  log_age_s,
+        "db_age_s":   db_age_s,
+        "detail":     detail,
+    }
 
 
 @app.get("/api/v1/portfolio/state")
@@ -642,6 +981,7 @@ class TradeItem(BaseModel):
     symbol: str
     direction: str
     shares: int = 100
+    quantity: Optional[float] = None   # exact fractional qty (V6-authoritative for crypto/forex)
     tier: str = "manual"
     scores: Optional[dict[str, float]] = None
     tags: Optional[list[str]] = None
@@ -659,6 +999,20 @@ class ExecuteRequest(BaseModel):
     trades: list[TradeItem]
     profile_id: Optional[str] = None
     preview_only: bool = False
+
+
+class ExecuteResponse(BaseModel):
+    approved: list[dict[str, Any]]
+    rejected: list[dict[str, Any]]
+    summary: dict[str, Any]
+    submitted: int
+    failed: int
+    results: list[dict[str, Any]]
+    risky_verdict: Optional[dict[str, Any]] = None
+
+
+class RuntimeConfigUpdate(BaseModel):
+    config: dict[str, Any]
 
 
 class ExecutionUpdate(BaseModel):
@@ -685,14 +1039,85 @@ async def picks_today(
     return td_module.get_picks_today(trade_date=date)
 
 
-@app.post("/api/v1/execute")
-async def execute_trades(body: ExecuteRequest) -> dict[str, Any]:
+@app.get("/api/v1/risk/health")
+async def risky_health_proxy(request: Request) -> Response:
+    try:
+        response = await _request_risky(request.app, "GET", "/risk/health")
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.get("/api/v1/risk/config")
+async def risky_config_proxy(request: Request) -> Response:
+    try:
+        response = await _request_risky(request.app, "GET", "/risk/config")
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.post("/api/v1/risk/config")
+async def risky_config_update_proxy(request: Request) -> Response:
+    try:
+        payload = await request.json()
+        response = await _request_risky(request.app, "POST", "/risk/config", json_body=payload)
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.post("/api/v1/risk/check")
+async def risky_check_proxy(request: Request) -> Response:
+    try:
+        payload = await request.json()
+        response = await _request_risky(request.app, "POST", "/risk/check", json_body=payload)
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.post("/api/v1/risk/check_batch")
+async def risky_check_batch_proxy(request: Request) -> Response:
+    try:
+        payload = await request.json()
+        response = await _request_risky(request.app, "POST", "/risk/check_batch", json_body=payload)
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.get("/api/v1/risk/history")
+async def risky_history_proxy(
+    request: Request,
+    limit: int = Query(50, ge=1, le=500),
+) -> Response:
+    try:
+        response = await _request_risky(
+            request.app,
+            "GET",
+            "/risk/history",
+            params={"limit": limit},
+        )
+    except RiskyUnavailableError as exc:
+        return _risky_unreachable_response(str(exc))
+    return _proxy_response_from_httpx(response)
+
+
+@app.post("/api/v1/execute", response_model=ExecuteResponse)
+async def execute_trades(body: ExecuteRequest, request: Request) -> ExecuteResponse | JSONResponse:
+    risky_check = await _check_trades_with_risky(request, body.trades, body.profile_id)
+    if isinstance(risky_check, JSONResponse):
+        return risky_check
+
     trades = [t.model_dump() for t in body.trades]
-    return td_module.execute_trades(
+    result = td_module.execute_trades(
         trades,
         profile_id=body.profile_id,
         preview_only=body.preview_only,
     )
+    result["risky_verdict"] = _collapse_risky_verdicts(risky_check)
+    return ExecuteResponse(**result)
 
 
 @app.get("/api/v1/execution/log")
@@ -915,6 +1340,7 @@ async def test_report(
 
 
 _MERIDIAN_BARS_DB = Path.home() / "SS" / "Meridian" / "data" / "v2_universe.db"
+_VANGUARD_BARS_DB = Path(_DB_PATH)
 
 
 @app.get("/api/v1/sizing/{symbol}/{direction}")
@@ -970,6 +1396,99 @@ async def get_sizing(symbol: str, direction: str) -> dict[str, Any]:
         "price": price,
         "atr_14": round(atr, 4),
         "atr_pct": round(atr / price * 100, 2) if price else 0.0,
+        "stops": {
+            "atr_1_5": stop_at(1.5),
+            "atr_2_0": stop_at(2.0),
+            "atr_2_5": stop_at(2.5),
+        },
+    }
+
+
+@app.get("/api/v1/vanguard_sizing/{symbol}/{direction}")
+async def get_vanguard_sizing(symbol: str, direction: str) -> dict[str, Any]:
+    """
+    Return intraday ATR(14) and position sizing stops for a symbol.
+
+    Uses vanguard_bars_5m (5-minute bars) from the Vanguard universe DB — the
+    same data source and same AVG(high-low) formula V6 uses in _enrich_with_prices().
+    Falls back to vanguard_bars_1h if 5m has no data for the symbol.
+
+    Returns atr_14=null with fallback=true if neither table has the symbol, so
+    Risky's existing fallback logic can warn-and-proceed rather than crash.
+    """
+    ticker = symbol.upper()
+    is_long = direction.upper() == "LONG"
+
+    if not _VANGUARD_BARS_DB.exists():
+        raise HTTPException(status_code=503, detail="Vanguard bars DB unavailable")
+
+    atr: float | None = None
+    price: float | None = None
+
+    try:
+        with sqlite_conn(str(_VANGUARD_BARS_DB)) as con:
+            for table in ("vanguard_bars_5m", "vanguard_bars_1h"):
+                if atr is not None:
+                    break
+
+                # Latest close
+                price_row = con.execute(
+                    f"""
+                    SELECT b.close
+                    FROM {table} b
+                    INNER JOIN (
+                        SELECT symbol, MAX(bar_ts_utc) AS max_ts
+                        FROM {table} WHERE symbol = ?
+                    ) latest ON b.symbol = latest.symbol AND b.bar_ts_utc = latest.max_ts
+                    """,
+                    (ticker,),
+                ).fetchone()
+                if not price_row or not price_row[0]:
+                    continue
+                price = float(price_row[0])
+
+                # ATR: AVG(high - low) over last 14 bars — same formula as V6 _enrich_with_prices()
+                atr_row = con.execute(
+                    f"""
+                    SELECT AVG(high - low) AS avg_hl
+                    FROM (
+                        SELECT high, low,
+                               ROW_NUMBER() OVER (ORDER BY bar_ts_utc DESC) rn
+                        FROM {table} WHERE symbol = ?
+                    ) WHERE rn <= 14
+                    """,
+                    (ticker,),
+                ).fetchone()
+                if atr_row and atr_row[0]:
+                    atr = float(atr_row[0])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if atr is None or price is None:
+        # Symbol not in Vanguard bars — return null ATR so Risky's fallback path fires
+        return {
+            "symbol": ticker,
+            "direction": direction.upper(),
+            "price": None,
+            "atr_14": None,
+            "atr_pct": None,
+            "fallback": True,
+            "fallback_reason": f"No 5m or 1h bars found for {ticker} in vanguard_universe.db",
+            "stops": None,
+        }
+
+    def stop_at(mult: float) -> dict[str, Any]:
+        dist = round(atr * mult, 6)
+        stop_price = round(price - dist, 6) if is_long else round(price + dist, 6)
+        return {"distance": dist, "price": stop_price}
+
+    return {
+        "symbol": ticker,
+        "direction": direction.upper(),
+        "price": round(price, 6),
+        "atr_14": round(atr, 6),
+        "atr_pct": round(atr / price * 100, 4) if price else 0.0,
+        "fallback": False,
         "stops": {
             "atr_1_5": stop_at(1.5),
             "atr_2_0": stop_at(2.0),
@@ -1083,26 +1602,162 @@ def _get_live_prices_batch(symbols: list[str]) -> dict[str, float]:
 
     return prices
 
+def _is_stale(updated_at_utc: str | None, threshold_minutes: int = 5) -> bool:
+    """Return True if the timestamp is older than threshold_minutes from now."""
+    if not updated_at_utc:
+        return True
+    try:
+        from datetime import timezone as _tz
+        ts = datetime.fromisoformat(updated_at_utc.replace("Z", "+00:00"))
+        age_s = (datetime.now(_tz.utc) - ts).total_seconds()
+        return age_s > threshold_minutes * 60
+    except Exception:
+        return True
+
+
+def _read_open_positions_for_profile(profile_id: str) -> list[dict[str, Any]]:
+    """Read live open positions from the broker-mirrored vanguard_open_positions table."""
+    try:
+        with sqlite3.connect(str(_DB_PATH)) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                """
+                SELECT broker_position_id, symbol, side, qty,
+                       entry_price, current_sl, current_tp,
+                       unrealized_pnl, opened_at_utc, last_synced_at_utc
+                FROM vanguard_open_positions
+                WHERE profile_id = ?
+                ORDER BY opened_at_utc DESC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.error("_read_open_positions_for_profile %s: %s", profile_id, exc)
+        return []
+
+
+def _read_account_state_for_profile_unified(profile_id: str) -> dict[str, Any] | None:
+    """Read live account state from the broker-mirrored vanguard_account_state table.
+    Thin wrapper so unified_api doesn't import from trade_desk (avoids circular imports).
+    The authoritative implementation is td_module._read_account_state_for_profile().
+    """
+    return td_module._read_account_state_for_profile(profile_id)
+
+
 @app.get("/api/v1/portfolio/live")
 async def get_live_portfolio(
+    profile_id: Optional[str] = Query(None, description="Profile ID to scope positions (e.g. gft_10k)"),
     date: Optional[str] = Query(None, description="YYYY-MM-DD; defaults to today"),
 ) -> dict[str, Any]:
     """
-    Return open positions from execution_log with live prices from yfinance.
+    Return open positions with unrealized P&L.
 
-    Only rows with outcome IS NULL or outcome = 'OPEN' for the given date
-    are included. Each position shows entry_price, live_price, unrealized P&L.
+    For metaapi profiles (GFT): reads from vanguard_open_positions (broker-mirrored
+    by lifecycle daemon every 60s). source="broker_truth".
+
+    For signalstack profiles (TTP) or when no profile_id given: reads from
+    execution_log with live prices from yfinance. source="journal_derived".
+
+    Adds stale=true + warning if account_state is >5 minutes old.
     """
     date_str = date or str(date_type.today())
 
+    # Determine broker kind for this profile
+    broker_kind = ""
+    if profile_id:
+        profile = acc_module.get_profile(profile_id)
+        bridge = str((profile or {}).get("execution_bridge") or "")
+        broker_kind = bridge.split("_")[0]  # "metaapi" | "mt5" | "signalstack" | ""
+
+    if broker_kind == "metaapi" and profile_id:
+        # ── Broker-truth path for MetaApi (GFT) profiles ──────────────────
+        broker_positions = _read_open_positions_for_profile(profile_id)
+        acct_state = _read_account_state_for_profile_unified(profile_id)
+
+        positions = []
+        total_pnl = 0.0
+        winners = 0
+        losers = 0
+        for bp in broker_positions:
+            unr = float(bp.get("unrealized_pnl") or 0.0)
+            total_pnl += unr
+            if unr > 0:
+                winners += 1
+            elif unr < 0:
+                losers += 1
+            side = str(bp.get("side") or "LONG").upper()
+            # Map vanguard_open_positions columns to PortfolioPosition shape
+            positions.append({
+                "id": str(bp.get("broker_position_id") or ""),
+                "symbol": str(bp.get("symbol") or ""),
+                "direction": side,
+                "shares": float(bp.get("qty") or 0.0),
+                "entry_price": float(bp.get("entry_price") or 0.0),
+                "fill_price": float(bp.get("entry_price") or 0.0),
+                "filled_at": bp.get("opened_at_utc"),
+                "execution_fee": None,
+                "stop_loss": float(bp["current_sl"]) if bp.get("current_sl") is not None else None,
+                "take_profit": float(bp["current_tp"]) if bp.get("current_tp") is not None else None,
+                "live_price": None,       # broker gives unrealized_pnl directly
+                "unrealized_pnl": unr,
+                "unrealized_pct": None,
+                "tier": "broker",
+                "tags": None,
+                "executed_at": bp.get("opened_at_utc"),
+                "account": profile_id,
+                "broker_position_id": str(bp.get("broker_position_id") or ""),
+                "last_synced_at_utc": bp.get("last_synced_at_utc"),
+            })
+
+        resp: dict[str, Any] = {
+            "positions": positions,
+            "summary": {
+                "total_unrealized_pnl": round(total_pnl, 2),
+                "count": len(positions),
+                "winners": winners,
+                "losers": losers,
+            },
+            "as_of": now_et().isoformat(),
+            "source": "broker_truth",
+            "profile_id": profile_id,
+        }
+
+        # Account state + stale guard
+        if acct_state:
+            resp["account_state"] = {
+                "equity": float(acct_state.get("equity") or 0.0),
+                "starting_equity_today": float(acct_state.get("starting_equity_today") or 0.0),
+                "daily_pnl_pct": float(acct_state.get("daily_pnl_pct") or 0.0),
+                "trailing_dd_pct": float(acct_state.get("trailing_dd_pct") or 0.0),
+                "updated_at_utc": acct_state.get("updated_at_utc"),
+            }
+            if _is_stale(acct_state.get("updated_at_utc"), threshold_minutes=5):
+                resp["stale"] = True
+                resp["warning"] = (
+                    "Account state is stale by > 5 minutes — lifecycle daemon may not be running. "
+                    "Check qa_servers.sh."
+                )
+            else:
+                resp["stale"] = False
+
+        return resp
+
+    # ── Journal-derived path for signalstack (TTP) or no profile_id ───────
     all_rows = td_module.get_execution_log(date=date_str, limit=500)
     open_rows = [r for r in all_rows if not r.get("outcome") or r["outcome"] == "OPEN"]
+
+    # Scope to profile if provided (signalstack profiles have account tag)
+    if profile_id:
+        open_rows = [r for r in open_rows if str(r.get("account") or "") == profile_id]
 
     if not open_rows:
         return {
             "positions": [],
             "summary": {"total_unrealized_pnl": 0.0, "count": 0, "winners": 0, "losers": 0},
             "as_of": now_et().isoformat(),
+            "source": "journal_derived",
+            "profile_id": profile_id,
         }
 
     symbols = list({r["symbol"] for r in open_rows})
@@ -1161,6 +1816,8 @@ async def get_live_portfolio(
             "losers": losers,
         },
         "as_of": now_et().isoformat(),
+        "source": "journal_derived",
+        "profile_id": profile_id,
     }
 
 

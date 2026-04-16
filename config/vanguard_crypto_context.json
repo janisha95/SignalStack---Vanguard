@@ -1,0 +1,26 @@
+{
+  "schema_version": "crypto_context_v1",
+  "defaults": {
+    "validation_mode": true,
+    "source": "mt5_dwx",
+    "trade_allowed": true,
+    "min_qty": 0.000001,
+    "max_qty": null,
+    "qty_step": 0.000001,
+    "tick_size": null,
+    "emergency_default_spread_bps": 50.0,
+    "default_liquidity_bucket": "medium",
+    "baseline_spread_bps": {
+      "BTCUSD": 11.0,
+      "ETHUSD": 12.0,
+      "BNBUSD": 25.0,
+      "BCHUSD": 12.0,
+      "LTCUSD": 36.0,
+      "SOLUSD": 36.0
+    },
+    "liquidity_buckets": {
+      "high": ["BTCUSD", "ETHUSD"],
+      "medium": ["BNBUSD", "BCHUSD", "LTCUSD", "SOLUSD"]
+    }
+  }
+}

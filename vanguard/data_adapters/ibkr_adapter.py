@@ -291,12 +291,25 @@ class IBKRAdapter:
         if self.ib.isConnected():
             return True
 
+        # Check runtime config enabled flag before attempting any connection.
+        # Prevents 5 successive connection attempts (30+ error lines) when
+        # IBKR/TWS is not running.
+        try:
+            from vanguard.config.runtime_config import get_runtime_config
+            ibkr_cfg = get_runtime_config().get("data_sources", {}).get("ibkr", {})
+            if str(ibkr_cfg.get("enabled", "true")).strip().lower() in {"0", "false", "no", "off"}:
+                logger.info("[IBKR] data_sources.ibkr.enabled=false — skipping connection")
+                return False
+        except Exception:
+            pass  # if config unavailable, attempt connection normally
+
         candidate_ids = [self.client_id]
         candidate_ids.extend(
             cid
             for cid in range(self.client_id + 1, self.client_id + 6)
             if cid != 11
         )
+        connected = False
         for cid in candidate_ids:
             try:
                 self.ib.connect(self.host, self.port, clientId=cid, timeout=10)
@@ -308,7 +321,8 @@ class IBKRAdapter:
                             self.client_id,
                         )
                         self.client_id = cid
-                    return True
+                    connected = True
+                    break
             except Exception as exc:
                 logger.warning(
                     "IBKR connect failed host=%s port=%s client_id=%s: %s",
@@ -322,7 +336,13 @@ class IBKRAdapter:
                     self.ib.disconnect()
             except Exception:
                 pass
-        return False
+        if not connected:
+            logger.warning(
+                "[IBKR] Not connected — all %d client ID(s) failed. "
+                "Set data_sources.ibkr.enabled=false in runtime config to suppress retries.",
+                len(candidate_ids),
+            )
+        return connected
 
     def disconnect(self):
         try:

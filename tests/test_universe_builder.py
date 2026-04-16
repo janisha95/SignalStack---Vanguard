@@ -366,6 +366,11 @@ class TestRefreshToDb:
         assert "metal" in asset_classes
         assert "energy" in asset_classes
 
+    def test_runtime_source_resolution_uses_runtime_config(self, loaded):
+        assert ub._runtime_data_source_for_asset_class("forex", fallback="unknown") == "twelvedata"
+        assert ub._runtime_data_source_for_asset_class("crypto", fallback="unknown") == "mt5_dwx"
+        assert ub._runtime_data_source_for_asset_class("metal", fallback="unknown") == "ibkr"
+
     def test_refresh_topstep_stores_tick_info(self, loaded, tmp_db):
         ub.refresh_to_db("topstep_futures", tmp_db, "2025-01-10T14:00:00Z")
         rows = tmp_db.get_universe_members("topstep_futures")

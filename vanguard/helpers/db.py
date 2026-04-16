@@ -9,17 +9,28 @@ Location: ~/SS/Vanguard/vanguard/helpers/db.py
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 import logging
 import sqlite3
 import time
 from pathlib import Path
 from typing import Iterable
 
+from vanguard.config.runtime_config import (
+    resolve_market_data_source_label,
+    get_readonly_passthrough_tables,
+    get_shadow_db_path,
+    get_source_db_path,
+    is_replay_from_source_db,
+)
+
 logger = logging.getLogger(__name__)
 
 _DB_CONNECT_ATTEMPTS = 3
 _DB_CONNECT_RETRY_SLEEP_SEC = 0.3
 _DB_WAL_WARN_BYTES = 1 * 1024 * 1024 * 1024
+_DB_WRITE_RETRY_ATTEMPTS = 12
+_DB_WRITE_RETRY_SLEEP_SEC = 0.5
 _CRYPTO_TRAINING_FEATURE_COLUMNS = [
     "btc_relative_momentum",
     "btc_adjusted_return",
@@ -31,6 +42,69 @@ _CRYPTO_TRAINING_FEATURE_COLUMNS = [
     "liquidity_sweep_strength",
     "fvg_size",
 ]
+
+
+def _legacy_universe_source(asset_class: str, universe: str, existing_source: str | None = None) -> str:
+    """Resolve a bar-source label for migrated universe rows using runtime config first."""
+    resolved = resolve_market_data_source_label(asset_class)
+    if resolved and resolved != "unknown":
+        return resolved
+    universe_name = str(universe or "").lower()
+    if universe_name.startswith("ttp"):
+        return "alpaca"
+    if universe_name.startswith("topstep") or str(asset_class or "").lower() == "futures":
+        return "ibkr"
+    if existing_source:
+        return str(existing_source)
+    return "unknown"
+
+
+def _resolved_path(db_path: str) -> str:
+    return str(Path(db_path).expanduser().resolve())
+
+
+def _is_sqlite_write_lock(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database table is locked" in msg or "busy" in msg
+
+
+def _uses_shadow_source_overlay(db_path: str) -> bool:
+    return (
+        is_replay_from_source_db()
+        and _resolved_path(db_path) == _resolved_path(get_shadow_db_path())
+        and _resolved_path(get_source_db_path()) != _resolved_path(get_shadow_db_path())
+    )
+
+
+def _attach_source_readonly_views(conn: sqlite3.Connection, db_path: str) -> None:
+    """Expose large source tables from the prod DB as temp read-only views."""
+    if not _uses_shadow_source_overlay(db_path):
+        return
+
+    source_db_path = _resolved_path(get_source_db_path())
+    if not Path(source_db_path).exists():
+        logger.warning("QA source DB missing; continuing without source overlay: %s", source_db_path)
+        return
+
+    conn.execute(f"ATTACH DATABASE 'file:{source_db_path}?mode=ro' AS source_db")
+    passthrough_tables = set(get_readonly_passthrough_tables())
+    source_rows = conn.execute(
+        "SELECT name FROM source_db.sqlite_master WHERE type='table'"
+    ).fetchall()
+    source_tables = {str(r[0]) for r in source_rows}
+    for table_name in sorted(passthrough_tables & source_tables):
+        try:
+            conn.execute(
+                f"CREATE TEMP VIEW IF NOT EXISTS {table_name} AS "
+                f"SELECT * FROM source_db.{table_name}"
+            )
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                "Could not expose source read-only view for %s from %s: %s",
+                table_name,
+                source_db_path,
+                exc,
+            )
 
 
 class _AutoCloseConnection(sqlite3.Connection):
@@ -81,6 +155,7 @@ def connect_wal(db_path: str) -> sqlite3.Connection:
             conn.execute("PRAGMA busy_timeout=30000;")
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.row_factory = sqlite3.Row
+            _attach_source_readonly_views(conn, db_path)
             return conn
         except sqlite3.Error as exc:
             last_exc = exc
@@ -248,74 +323,78 @@ class VanguardDB:
                     for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
                 }
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_bars_5m (
-                    symbol      TEXT NOT NULL,
-                    bar_ts_utc  TEXT NOT NULL,
-                    open        REAL,
-                    high        REAL,
-                    low         REAL,
-                    close       REAL,
-                    volume      INTEGER,
-                    asset_class TEXT DEFAULT 'equity',
-                    data_source TEXT DEFAULT 'alpaca',
-                    PRIMARY KEY (symbol, bar_ts_utc)
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_bars_1h (
-                    symbol     TEXT NOT NULL,
-                    bar_ts_utc TEXT NOT NULL,
-                    open       REAL,
-                    high       REAL,
-                    low        REAL,
-                    close      REAL,
-                    volume     INTEGER,
-                    PRIMARY KEY (symbol, bar_ts_utc)
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_bars_1m (
-                    symbol        TEXT    NOT NULL,
-                    bar_ts_utc    TEXT    NOT NULL,
-                    open          REAL,
-                    high          REAL,
-                    low           REAL,
-                    close         REAL,
-                    volume        INTEGER,
-                    tick_volume   INTEGER DEFAULT 0,
-                    asset_class   TEXT    DEFAULT 'unknown',
-                    data_source   TEXT    DEFAULT 'unknown',
-                    ingest_ts_utc TEXT,
-                    PRIMARY KEY (symbol, bar_ts_utc)
-                )
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_ts
-                    ON vanguard_bars_1m(bar_ts_utc)
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_source_asset_ts
-                    ON vanguard_bars_1m(data_source, asset_class, bar_ts_utc)
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_symbol_ts
-                    ON vanguard_bars_1m(symbol, bar_ts_utc)
-            """)
+            owns_source_tables = not _uses_shadow_source_overlay(self.db_path)
+
+            if owns_source_tables:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vanguard_bars_5m (
+                        symbol      TEXT NOT NULL,
+                        bar_ts_utc  TEXT NOT NULL,
+                        open        REAL,
+                        high        REAL,
+                        low         REAL,
+                        close       REAL,
+                        volume      INTEGER,
+                        asset_class TEXT DEFAULT 'equity',
+                        data_source TEXT DEFAULT 'alpaca',
+                        PRIMARY KEY (symbol, bar_ts_utc)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vanguard_bars_1h (
+                        symbol     TEXT NOT NULL,
+                        bar_ts_utc TEXT NOT NULL,
+                        open       REAL,
+                        high       REAL,
+                        low        REAL,
+                        close      REAL,
+                        volume     INTEGER,
+                        PRIMARY KEY (symbol, bar_ts_utc)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vanguard_bars_1m (
+                        symbol        TEXT    NOT NULL,
+                        bar_ts_utc    TEXT    NOT NULL,
+                        open          REAL,
+                        high          REAL,
+                        low           REAL,
+                        close         REAL,
+                        volume        INTEGER,
+                        tick_volume   INTEGER DEFAULT 0,
+                        asset_class   TEXT    DEFAULT 'unknown',
+                        data_source   TEXT    DEFAULT 'unknown',
+                        ingest_ts_utc TEXT,
+                        PRIMARY KEY (symbol, bar_ts_utc)
+                    )
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_ts
+                        ON vanguard_bars_1m(bar_ts_utc)
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_source_asset_ts
+                        ON vanguard_bars_1m(data_source, asset_class, bar_ts_utc)
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_bars_1m_symbol_ts
+                        ON vanguard_bars_1m(symbol, bar_ts_utc)
+                """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS vanguard_cache_meta (
                     key   TEXT PRIMARY KEY,
                     value TEXT
                 )
             """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_5m_ts
-                    ON vanguard_bars_5m(bar_ts_utc)
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_bars_5m_symbol_ts
-                    ON vanguard_bars_5m(symbol, bar_ts_utc)
-            """)
+            if owns_source_tables:
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_bars_5m_ts
+                        ON vanguard_bars_5m(bar_ts_utc)
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_bars_5m_symbol_ts
+                        ON vanguard_bars_5m(symbol, bar_ts_utc)
+                """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS vanguard_health (
                     symbol          TEXT NOT NULL,
@@ -348,36 +427,9 @@ class VanguardDB:
                     PRIMARY KEY (symbol, cycle_ts_utc)
                 )
             """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_universe_members (
-                    symbol        TEXT NOT NULL,
-                    asset_class   TEXT NOT NULL,
-                    data_source   TEXT NOT NULL,
-                    universe      TEXT NOT NULL,
-                    exchange      TEXT,
-                    tick_size     REAL,
-                    tick_value    REAL,
-                    point_value   REAL,
-                    margin        REAL,
-                    session_start TEXT,
-                    session_end   TEXT,
-                    session_tz    TEXT DEFAULT 'America/New_York',
-                    is_active     INTEGER DEFAULT 1,
-                    added_at      TEXT,
-                    last_seen_at  TEXT,
-                    PRIMARY KEY (symbol, data_source)
-                )
-            """)
-            cols = _table_columns("vanguard_universe_members")
-            expected_cols = {
-                "symbol", "asset_class", "data_source", "universe", "exchange",
-                "tick_size", "tick_value", "point_value", "margin",
-                "session_start", "session_end", "session_tz",
-                "is_active", "added_at", "last_seen_at",
-            }
-            if cols != expected_cols:
+            if owns_source_tables:
                 conn.execute("""
-                    CREATE TABLE IF NOT EXISTS vanguard_universe_members_v2 (
+                    CREATE TABLE IF NOT EXISTS vanguard_universe_members (
                         symbol        TEXT NOT NULL,
                         asset_class   TEXT NOT NULL,
                         data_source   TEXT NOT NULL,
@@ -396,59 +448,112 @@ class VanguardDB:
                         PRIMARY KEY (symbol, data_source)
                     )
                 """)
-                if cols:
-                    _safe_execute("""
-                        INSERT OR REPLACE INTO vanguard_universe_members_v2 (
-                            symbol, asset_class, data_source, universe, exchange,
-                            tick_size, tick_value, point_value, margin,
-                            session_start, session_end, session_tz,
-                            is_active, added_at, last_seen_at
+                cols = _table_columns("vanguard_universe_members")
+                expected_cols = {
+                    "symbol", "asset_class", "data_source", "universe", "exchange",
+                    "tick_size", "tick_value", "point_value", "margin",
+                    "session_start", "session_end", "session_tz",
+                    "is_active", "added_at", "last_seen_at",
+                }
+                if cols != expected_cols:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS vanguard_universe_members_v2 (
+                            symbol        TEXT NOT NULL,
+                            asset_class   TEXT NOT NULL,
+                            data_source   TEXT NOT NULL,
+                            universe      TEXT NOT NULL,
+                            exchange      TEXT,
+                            tick_size     REAL,
+                            tick_value    REAL,
+                            point_value   REAL,
+                            margin        REAL,
+                            session_start TEXT,
+                            session_end   TEXT,
+                            session_tz    TEXT DEFAULT 'America/New_York',
+                            is_active     INTEGER DEFAULT 1,
+                            added_at      TEXT,
+                            last_seen_at  TEXT,
+                            PRIMARY KEY (symbol, data_source)
                         )
-                        SELECT
-                            symbol,
-                            asset_class,
-                            CASE
-                                WHEN universe LIKE 'ttp%' THEN 'alpaca'
-                                WHEN universe LIKE 'ftmo%' THEN 'twelvedata'
-                                WHEN universe LIKE 'topstep%' THEN 'ibkr'
-                                ELSE 'unknown'
-                            END AS data_source,
-                            universe,
-                            NULL AS exchange,
-                            tick_size,
-                            tick_value,
-                            NULL AS point_value,
-                            margin,
-                            CASE
-                                WHEN asset_class = 'equity' THEN '09:30'
-                                ELSE NULL
-                            END AS session_start,
-                            CASE
-                                WHEN asset_class = 'equity' THEN '16:00'
-                                ELSE NULL
-                            END AS session_end,
-                            'America/New_York' AS session_tz,
-                            1 AS is_active,
-                            COALESCE(last_refreshed_utc, datetime('now')) AS added_at,
-                            COALESCE(last_refreshed_utc, datetime('now')) AS last_seen_at
-                        FROM vanguard_universe_members
                     """)
-                    _safe_execute("DROP TABLE vanguard_universe_members")
-                    _safe_execute(
-                        "ALTER TABLE vanguard_universe_members_v2 RENAME TO vanguard_universe_members"
-                    )
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_universe_members_universe
-                    ON vanguard_universe_members(universe)
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_universe_members_asset
-                    ON vanguard_universe_members(asset_class)
-            """)
-            _safe_execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_universe_members_source
-                    ON vanguard_universe_members(data_source)
-            """)
+                    if cols:
+                        legacy_rows = conn.execute(
+                            "SELECT * FROM vanguard_universe_members"
+                        ).fetchall()
+                        conn.executemany(
+                            """
+                            INSERT OR REPLACE INTO vanguard_universe_members_v2 (
+                                symbol, asset_class, data_source, universe, exchange,
+                                tick_size, tick_value, point_value, margin,
+                                session_start, session_end, session_tz,
+                                is_active, added_at, last_seen_at
+                            )
+                            VALUES (
+                                :symbol, :asset_class, :data_source, :universe, :exchange,
+                                :tick_size, :tick_value, :point_value, :margin,
+                                :session_start, :session_end, :session_tz,
+                                :is_active, :added_at, :last_seen_at
+                            )
+                            """,
+                            [
+                                {
+                                    "symbol": row["symbol"],
+                                    "asset_class": row["asset_class"],
+                                    "data_source": _legacy_universe_source(
+                                        str(row["asset_class"] or ""),
+                                        str(row["universe"] or ""),
+                                        str(row["data_source"]) if "data_source" in cols else None,
+                                    ),
+                                    "universe": row["universe"],
+                                    "exchange": row["exchange"] if "exchange" in cols else None,
+                                    "tick_size": row["tick_size"] if "tick_size" in cols else None,
+                                    "tick_value": row["tick_value"] if "tick_value" in cols else None,
+                                    "point_value": row["point_value"] if "point_value" in cols else None,
+                                    "margin": row["margin"] if "margin" in cols else None,
+                                    "session_start": (
+                                        row["session_start"]
+                                        if "session_start" in cols
+                                        else ("09:30" if row["asset_class"] == "equity" else None)
+                                    ),
+                                    "session_end": (
+                                        row["session_end"]
+                                        if "session_end" in cols
+                                        else ("16:00" if row["asset_class"] == "equity" else None)
+                                    ),
+                                    "session_tz": (
+                                        row["session_tz"] if "session_tz" in cols else "America/New_York"
+                                    ),
+                                    "is_active": row["is_active"] if "is_active" in cols else 1,
+                                    "added_at": (
+                                        row["added_at"]
+                                        if "added_at" in cols
+                                        else row["last_refreshed_utc"] if "last_refreshed_utc" in cols else None
+                                    ) or datetime.utcnow().isoformat(),
+                                    "last_seen_at": (
+                                        row["last_seen_at"]
+                                        if "last_seen_at" in cols
+                                        else row["last_refreshed_utc"] if "last_refreshed_utc" in cols else None
+                                    ) or datetime.utcnow().isoformat(),
+                                }
+                                for row in legacy_rows
+                            ],
+                        )
+                        _safe_execute("DROP TABLE vanguard_universe_members")
+                        _safe_execute(
+                            "ALTER TABLE vanguard_universe_members_v2 RENAME TO vanguard_universe_members"
+                        )
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_universe_members_universe
+                        ON vanguard_universe_members(universe)
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_universe_members_asset
+                        ON vanguard_universe_members(asset_class)
+                """)
+                _safe_execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_universe_members_source
+                        ON vanguard_universe_members(data_source)
+                """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS vanguard_source_health (
                     data_source              TEXT NOT NULL,
@@ -466,8 +571,9 @@ class VanguardDB:
             # ------------------------------------------------------------------
             # vanguard_training_data (V4A)
             # ------------------------------------------------------------------
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS vanguard_training_data (
+            if owns_source_tables:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vanguard_training_data (
                     asof_ts_utc                     TEXT NOT NULL,
                     symbol                          TEXT NOT NULL,
                     asset_class                     TEXT NOT NULL,
@@ -533,23 +639,23 @@ class VanguardDB:
                     tbm_profile                     TEXT,
                     PRIMARY KEY (asof_ts_utc, symbol, horizon_bars)
                 )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_train_asset
-                    ON vanguard_training_data(asset_class)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_train_date
-                    ON vanguard_training_data(asof_ts_utc)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_train_long
-                    ON vanguard_training_data(label_long)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vg_train_short
-                    ON vanguard_training_data(label_short)
-            """)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_train_asset
+                        ON vanguard_training_data(asset_class)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_train_date
+                        ON vanguard_training_data(asof_ts_utc)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_train_long
+                        ON vanguard_training_data(label_long)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vg_train_short
+                        ON vanguard_training_data(label_short)
+                """)
             # ------------------------------------------------------------------
             # vanguard_model_registry (V4B)
             # ------------------------------------------------------------------
@@ -600,9 +706,10 @@ class VanguardDB:
                     PRIMARY KEY (model_id, window_id)
                 )
             """)
-            _ensure_column("vanguard_training_data", "tbm_profile", "tbm_profile TEXT")
-            for column in _CRYPTO_TRAINING_FEATURE_COLUMNS:
-                _ensure_column("vanguard_training_data", column, f"{column} REAL")
+            if owns_source_tables:
+                _ensure_column("vanguard_training_data", "tbm_profile", "tbm_profile TEXT")
+                for column in _CRYPTO_TRAINING_FEATURE_COLUMNS:
+                    _ensure_column("vanguard_training_data", column, f"{column} REAL")
             _ensure_column("vanguard_model_registry", "asset_class", "asset_class TEXT")
             _ensure_column("vanguard_model_registry", "direction", "direction TEXT")
             _ensure_column("vanguard_model_registry", "feature_profile", "feature_profile TEXT")
@@ -699,6 +806,54 @@ class VanguardDB:
                     }
                     for r in rows
                 ],
+            )
+            conn.commit()
+        return len(rows)
+
+    def upsert_bars_mtf(self, rows: list[dict], timeframe: str) -> int:
+        """
+        Batch upsert aggregated intraday bars (10m/15m/30m).
+        Each row must have keys: symbol, bar_ts_utc, open, high, low,
+        close, volume, asset_class, data_source.
+        """
+        if not rows:
+            return 0
+        table = f"vanguard_bars_{timeframe}"
+        if timeframe not in {"10m", "15m", "30m"}:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        with self.connect() as conn:
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                    symbol TEXT NOT NULL,
+                    bar_ts_utc TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume REAL,
+                    asset_class TEXT,
+                    source TEXT DEFAULT 'aggregated_from_5m',
+                    PRIMARY KEY (symbol, bar_ts_utc)
+                )
+                """
+            )
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{table}_symbol_ts
+                    ON {table}(symbol, bar_ts_utc)
+                """
+            )
+            conn.executemany(
+                f"""
+                INSERT OR REPLACE INTO {table}
+                    (symbol, bar_ts_utc, open, high, low, close, volume,
+                     asset_class, source)
+                VALUES
+                    (:symbol, :bar_ts_utc, :open, :high, :low, :close, :volume,
+                     :asset_class, :data_source)
+                """,
+                rows,
             )
             conn.commit()
         return len(rows)
@@ -896,18 +1051,37 @@ class VanguardDB:
         self,
         symbol: str,
         table: str = "vanguard_bars_5m",
-        limit: int = 200,
+        limit: int | None = 200,
+        data_source: str | None = None,
+        start_ts_utc: str | None = None,
+        end_ts_utc: str | None = None,
     ) -> list[dict]:
         """
-        Fetch the most recent `limit` bars for a symbol in chronological order.
+        Fetch bars for a symbol in chronological order.
+        When `limit` is provided, returns the most recent `limit` bars.
         Table must be vanguard_bars_5m or vanguard_bars_1h.
         """
         with self.connect() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM {table} WHERE symbol = ? "
-                f"ORDER BY bar_ts_utc DESC LIMIT ?",
-                (symbol, limit),
-            ).fetchall()
+            columns = {
+                str(row[1])
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            where = ["symbol = ?"]
+            params: list[object] = [symbol]
+            if data_source and "data_source" in columns:
+                where.append("data_source = ?")
+                params.append(data_source)
+            if start_ts_utc:
+                where.append("bar_ts_utc >= ?")
+                params.append(start_ts_utc)
+            if end_ts_utc:
+                where.append("bar_ts_utc <= ?")
+                params.append(end_ts_utc)
+            query = f"SELECT * FROM {table} WHERE {' AND '.join(where)} ORDER BY bar_ts_utc DESC"
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            rows = conn.execute(query, tuple(params)).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def get_symbols_with_bars(self, table: str = "vanguard_bars_5m") -> list[str]:
@@ -946,6 +1120,11 @@ class VanguardDB:
                 """,
                 [
                     {
+                        "data_source": _legacy_universe_source(
+                            str(row.get("asset_class") or ""),
+                            str(row.get("universe") or ""),
+                            row.get("data_source"),
+                        ),
                         "exchange": None,
                         "tick_size": None,
                         "tick_value": None,
@@ -955,8 +1134,16 @@ class VanguardDB:
                         "session_end": None,
                         "session_tz": "America/New_York",
                         "is_active": 1,
-                        "added_at": row.get("added_at") or row.get("last_seen_at"),
-                        "last_seen_at": row.get("last_seen_at") or row.get("added_at"),
+                        "added_at": (
+                            row.get("added_at")
+                            or row.get("last_seen_at")
+                            or row.get("last_refreshed_utc")
+                        ),
+                        "last_seen_at": (
+                            row.get("last_seen_at")
+                            or row.get("added_at")
+                            or row.get("last_refreshed_utc")
+                        ),
                         **row,
                     }
                     for row in rows
@@ -985,7 +1172,12 @@ class VanguardDB:
                     "SELECT * FROM vanguard_universe_members "
                     "ORDER BY universe, data_source, symbol"
                 ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for row in rows:
+            item = dict(row)
+            item.setdefault("last_refreshed_utc", item.get("last_seen_at"))
+            out.append(item)
+        return out
 
     def count_universe_members(self) -> dict[str, int]:
         """Return {universe: count} for all universes in the DB."""
@@ -1050,64 +1242,81 @@ class VanguardDB:
         """
         if not rows:
             return 0
-        with self.connect() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO vanguard_training_data (
-                    asof_ts_utc, symbol, asset_class, path, entry_price,
-                    label_long, label_short,
-                    forward_return, max_favorable_excursion, max_adverse_excursion,
-                    exit_bar, exit_type_long, exit_type_short,
-                    truncated, warm_up,
-                    session_vwap_distance, premium_discount_zone, gap_pct,
-                    session_opening_range_position, daily_drawdown_from_high,
-                    momentum_3bar, momentum_12bar, momentum_acceleration,
-                    atr_expansion, daily_adx,
-                    relative_volume, volume_burst_z, down_volume_ratio,
-                    effort_vs_result, spread_proxy,
-                    rs_vs_benchmark_intraday, daily_rs_vs_benchmark,
-                    benchmark_momentum_12bar, cross_asset_correlation, daily_conviction,
-                    session_phase, time_in_session_pct, bars_since_session_open,
-                    ob_proximity_5m, fvg_bullish_nearest, fvg_bearish_nearest,
-                    structure_break, liquidity_sweep, smc_premium_discount,
-                    htf_trend_direction, htf_structure_break, htf_fvg_nearest,
-                    htf_ob_proximity,
-                    btc_relative_momentum, btc_adjusted_return,
-                    btc_correlation_z, volatility_regime, range_expansion_5m,
-                    momentum_divergence, volume_delta,
-                    liquidity_sweep_strength, fvg_size,
-                    bars_available, nan_ratio,
-                    horizon_bars, tp_pct, sl_pct, tbm_profile
-                ) VALUES (
-                    :asof_ts_utc, :symbol, :asset_class, :path, :entry_price,
-                    :label_long, :label_short,
-                    :forward_return, :max_favorable_excursion, :max_adverse_excursion,
-                    :exit_bar, :exit_type_long, :exit_type_short,
-                    :truncated, :warm_up,
-                    :session_vwap_distance, :premium_discount_zone, :gap_pct,
-                    :session_opening_range_position, :daily_drawdown_from_high,
-                    :momentum_3bar, :momentum_12bar, :momentum_acceleration,
-                    :atr_expansion, :daily_adx,
-                    :relative_volume, :volume_burst_z, :down_volume_ratio,
-                    :effort_vs_result, :spread_proxy,
-                    :rs_vs_benchmark_intraday, :daily_rs_vs_benchmark,
-                    :benchmark_momentum_12bar, :cross_asset_correlation, :daily_conviction,
-                    :session_phase, :time_in_session_pct, :bars_since_session_open,
-                    :ob_proximity_5m, :fvg_bullish_nearest, :fvg_bearish_nearest,
-                    :structure_break, :liquidity_sweep, :smc_premium_discount,
-                    :htf_trend_direction, :htf_structure_break, :htf_fvg_nearest,
-                    :htf_ob_proximity,
-                    :btc_relative_momentum, :btc_adjusted_return,
-                    :btc_correlation_z, :volatility_regime, :range_expansion_5m,
-                    :momentum_divergence, :volume_delta,
-                    :liquidity_sweep_strength, :fvg_size,
-                    :bars_available, :nan_ratio,
-                    :horizon_bars, :tp_pct, :sl_pct, :tbm_profile
+        payload = [{**row, "tbm_profile": row.get("tbm_profile")} for row in rows]
+        for attempt in range(1, _DB_WRITE_RETRY_ATTEMPTS + 1):
+            try:
+                with self.connect() as conn:
+                    conn.executemany(
+                        """
+                        INSERT OR REPLACE INTO vanguard_training_data (
+                            asof_ts_utc, symbol, asset_class, path, entry_price,
+                            label_long, label_short,
+                            forward_return, max_favorable_excursion, max_adverse_excursion,
+                            exit_bar, exit_type_long, exit_type_short,
+                            truncated, warm_up,
+                            session_vwap_distance, premium_discount_zone, gap_pct,
+                            session_opening_range_position, daily_drawdown_from_high,
+                            momentum_3bar, momentum_12bar, momentum_acceleration,
+                            atr_expansion, daily_adx,
+                            relative_volume, volume_burst_z, down_volume_ratio,
+                            effort_vs_result, spread_proxy,
+                            rs_vs_benchmark_intraday, daily_rs_vs_benchmark,
+                            benchmark_momentum_12bar, cross_asset_correlation, daily_conviction,
+                            session_phase, time_in_session_pct, bars_since_session_open,
+                            ob_proximity_5m, fvg_bullish_nearest, fvg_bearish_nearest,
+                            structure_break, liquidity_sweep, smc_premium_discount,
+                            htf_trend_direction, htf_structure_break, htf_fvg_nearest,
+                            htf_ob_proximity,
+                            btc_relative_momentum, btc_adjusted_return,
+                            btc_correlation_z, volatility_regime, range_expansion_5m,
+                            momentum_divergence, volume_delta,
+                            liquidity_sweep_strength, fvg_size,
+                            bars_available, nan_ratio,
+                            horizon_bars, tp_pct, sl_pct, tbm_profile
+                        ) VALUES (
+                            :asof_ts_utc, :symbol, :asset_class, :path, :entry_price,
+                            :label_long, :label_short,
+                            :forward_return, :max_favorable_excursion, :max_adverse_excursion,
+                            :exit_bar, :exit_type_long, :exit_type_short,
+                            :truncated, :warm_up,
+                            :session_vwap_distance, :premium_discount_zone, :gap_pct,
+                            :session_opening_range_position, :daily_drawdown_from_high,
+                            :momentum_3bar, :momentum_12bar, :momentum_acceleration,
+                            :atr_expansion, :daily_adx,
+                            :relative_volume, :volume_burst_z, :down_volume_ratio,
+                            :effort_vs_result, :spread_proxy,
+                            :rs_vs_benchmark_intraday, :daily_rs_vs_benchmark,
+                            :benchmark_momentum_12bar, :cross_asset_correlation, :daily_conviction,
+                            :session_phase, :time_in_session_pct, :bars_since_session_open,
+                            :ob_proximity_5m, :fvg_bullish_nearest, :fvg_bearish_nearest,
+                            :structure_break, :liquidity_sweep, :smc_premium_discount,
+                            :htf_trend_direction, :htf_structure_break, :htf_fvg_nearest,
+                            :htf_ob_proximity,
+                            :btc_relative_momentum, :btc_adjusted_return,
+                            :btc_correlation_z, :volatility_regime, :range_expansion_5m,
+                            :momentum_divergence, :volume_delta,
+                            :liquidity_sweep_strength, :fvg_size,
+                            :bars_available, :nan_ratio,
+                            :horizon_bars, :tp_pct, :sl_pct, :tbm_profile
+                        )
+                        """,
+                        payload,
+                    )
+                    conn.commit()
+                return len(rows)
+            except sqlite3.OperationalError as exc:
+                if not _is_sqlite_write_lock(exc) or attempt == _DB_WRITE_RETRY_ATTEMPTS:
+                    raise
+                sleep_s = min(5.0, _DB_WRITE_RETRY_SLEEP_SEC * attempt)
+                logger.warning(
+                    "SQLite write contention in upsert_training_data (attempt %d/%d, rows=%d): %s; sleeping %.1fs",
+                    attempt,
+                    _DB_WRITE_RETRY_ATTEMPTS,
+                    len(rows),
+                    exc,
+                    sleep_s,
                 )
-                """,
-                [{**row, "tbm_profile": row.get("tbm_profile")} for row in rows],
-            )
-            conn.commit()
+                time.sleep(sleep_s)
         return len(rows)
 
     def count_training_rows(

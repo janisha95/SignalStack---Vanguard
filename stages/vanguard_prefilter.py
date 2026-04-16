@@ -34,6 +34,13 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from vanguard.config.runtime_config import (
+    data_source_label_for_source_id,
+    get_runtime_config,
+    get_shadow_db_path,
+    is_replay_from_source_db,
+    resolve_market_data_source_id,
+)
 from vanguard.helpers.db import VanguardDB
 from vanguard.helpers.clock import now_utc, iso_utc
 from vanguard.helpers import universe_builder
@@ -53,7 +60,7 @@ logger = logging.getLogger("vanguard_prefilter")
 # Constants
 # ---------------------------------------------------------------------------
 
-DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "vanguard_universe.db")
+DB_PATH = get_shadow_db_path()
 
 STATUS_ACTIVE       = "ACTIVE"
 STATUS_STALE        = "STALE"
@@ -113,15 +120,35 @@ STALE_THRESHOLDS_MINUTES = {
 }
 
 
+def _load_v2_prefilter_config() -> dict:
+    cfg = get_runtime_config()
+    return dict(cfg.get("v2_prefilter") or {})
+
+
 def get_thresholds(universe_name: str = "ttp_equity") -> dict:
     """
     Return prefilter thresholds for the given universe.
     Falls back to equity defaults if universe is unknown.
     """
     try:
-        return universe_builder.get_health_thresholds(universe_name)
+        thresholds = universe_builder.get_health_thresholds(universe_name)
     except Exception:
-        return dict(_DEFAULT_THRESHOLDS)
+        thresholds = dict(_DEFAULT_THRESHOLDS)
+    runtime_defaults = dict((_load_v2_prefilter_config().get("defaults") or {}))
+    return {**_DEFAULT_THRESHOLDS, **thresholds, **runtime_defaults}
+
+
+def _thresholds_for_asset_class(asset_class: str, base_thresholds: dict) -> dict:
+    resolved = dict(base_thresholds or _DEFAULT_THRESHOLDS)
+    prefilter_cfg = _load_v2_prefilter_config()
+    asset_cfg = dict(((prefilter_cfg.get("asset_thresholds") or {}).get(asset_class) or {}))
+    resolved.update(asset_cfg)
+
+    if asset_class == "crypto":
+        crypto_validation_cfg = prefilter_cfg.get("crypto_validation") or {}
+        if bool(crypto_validation_cfg.get("enabled", False)):
+            resolved.update(dict(crypto_validation_cfg.get("thresholds") or {}))
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +229,7 @@ def is_session_active(
         return local_now.weekday() in allowed_days
 
     previous_day = (local_now.weekday() - 1) % 7
-    return local_now.weekday() in allowed_days or previous_day in allowed_days
+    return local_now.weekday() in allowed_days and previous_day in allowed_days
 
 
 def session_start_utc(
@@ -255,6 +282,20 @@ def _latest_bar_time(*bar_sets: list[dict]) -> datetime | None:
     return latest
 
 
+def _freshest_bar(*bar_sets: list[dict]) -> dict | None:
+    freshest: dict | None = None
+    freshest_ts: datetime | None = None
+    for bars in bar_sets:
+        if not bars:
+            continue
+        candidate = bars[-1]
+        candidate_ts = _parse_utc(candidate["bar_ts_utc"])
+        if freshest_ts is None or candidate_ts > freshest_ts:
+            freshest = candidate
+            freshest_ts = candidate_ts
+    return freshest
+
+
 def _bucket_counts_from_1m(bars_1m: list[dict]) -> list[int]:
     if not bars_1m:
         return []
@@ -273,7 +314,12 @@ def get_v2_universe(
     db: VanguardDB,
     symbols: list[str] | None = None,
 ) -> list[dict]:
-    """Get active symbols from the canonical universe bus."""
+    """Get active symbols from the canonical universe bus.
+
+    When explicit symbols are provided (e.g. from Phase 2a resolved universe),
+    symbols not found in vanguard_universe_members receive a synthetic fallback
+    row so that Phase 2a symbols are never silently dropped.
+    """
     with db.connect() as conn:
         if symbols:
             placeholders = ",".join("?" for _ in symbols)
@@ -295,7 +341,31 @@ def get_v2_universe(
                 ORDER BY asset_class, symbol
                 """
             ).fetchall()
-    return [dict(r) for r in rows]
+
+    result = [dict(r) for r in rows]
+
+    # When an explicit symbol list is given, synthesize fallback rows for any
+    # symbols not found in vanguard_universe_members so Phase 2a symbols are
+    # never silently dropped.
+    if symbols:
+        from vanguard.helpers.universe_builder import classify_asset_class
+        found = {row["symbol"].upper() for row in result}
+        for sym in symbols:
+            s = sym.upper()
+            if s not in found:
+                ac = classify_asset_class(s)
+                result.append({
+                    "symbol":       s,
+                    "asset_class":  ac,
+                    "data_source":  None,
+                    "session_start": None,
+                    "session_end":  None,
+                    "session_tz":   None,
+                })
+                logger.debug("get_v2_universe: synthetic fallback row for %s (asset_class=%s)", s, ac)
+        result.sort(key=lambda r: (r.get("asset_class") or "", r["symbol"]))
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +395,10 @@ def check_symbol(
     -------
     Health result dict matching vanguard_health schema.
     """
-    t = thresholds or _DEFAULT_THRESHOLDS
+    t = _thresholds_for_asset_class(
+        symbol_row.get("asset_class") or "equity",
+        thresholds or _DEFAULT_THRESHOLDS,
+    )
 
     max_stale_minutes = t.get("max_stale_minutes", MAX_STALE_MINUTES)
     min_rel_vol       = t.get("min_rel_vol",       MIN_REL_VOL)
@@ -338,8 +411,6 @@ def check_symbol(
     data_source = symbol_row.get("data_source")
     # IBKR forex streaming seeds recent history, but the intraday 1m->5m aggregator
     # only materializes a short rolling window. A 12-bar 5m warmup is enough for V3.
-    if asset_class == "forex":
-        min_bars_warmup = min(int(min_bars_warmup), 12)
     session_active = is_session_active(
         asset_class,
         now,
@@ -347,6 +418,9 @@ def check_symbol(
         session_end=symbol_row.get("session_end"),
         session_tz=symbol_row.get("session_tz"),
     )
+
+    last_bar = _freshest_bar(bars, bars_1m)
+    last_bar_ts = _latest_bar_time(bars, bars_1m)
 
     base: dict = {
         "symbol":           symbol,
@@ -357,7 +431,7 @@ def check_symbol(
         "relative_volume":  None,
         "spread_bps":       None,
         "bars_available":   len(bars),
-        "last_bar_ts_utc":  bars[-1]["bar_ts_utc"] if bars else (bars_1m[-1]["bar_ts_utc"] if bars_1m else None),
+        "last_bar_ts_utc":  last_bar_ts.strftime("%Y-%m-%dT%H:%M:%SZ") if last_bar_ts else None,
     }
 
     bucket_counts_1m = _bucket_counts_from_1m(bars_1m)
@@ -369,11 +443,9 @@ def check_symbol(
     if not bars and not bars_1m:
         return {**base, "status": STATUS_STALE if session_active else STATUS_CLOSED}
 
-    last_bar = bars[-1] if bars else bars_1m[-1]
-    last_ts = _latest_bar_time(bars, bars_1m)
-    if last_ts is None:
+    if last_bar_ts is None or last_bar is None:
         return {**base, "status": STATUS_STALE if session_active else STATUS_CLOSED}
-    age_seconds = int((now - last_ts).total_seconds())
+    age_seconds = int((now - last_bar_ts).total_seconds())
     base["last_bar_age_seconds"] = age_seconds
 
     if not session_active:
@@ -440,7 +512,7 @@ def check_symbol(
         session_tz=symbol_row.get("session_tz"),
     )
     if session_open is not None:
-        session_bars = bars if bars else bars_1m
+        session_bars = list(bars or []) + list(bars_1m or [])
         has_session_bar = any(_parse_utc(b["bar_ts_utc"]) >= session_open for b in session_bars)
         if not has_session_bar:
             return {**base, "status": STATUS_STALE}
@@ -458,24 +530,39 @@ def run(
     debug_symbol: str | None = None,
     universe_name: str = "ttp_equity",
     cycle_ts: str | None = None,
+    in_scope_symbols: list[str] | None = None,
 ) -> list[dict]:
     """
     Run health checks for all (or specified) symbols.
 
     Parameters
     ----------
-    symbols        : list of tickers to check; None = all symbols in DB
-    dry_run        : if True, compute but do not write to DB
-    debug_symbol   : if set, print detailed trace for this symbol
-    universe_name  : universe key for per-universe thresholds
-                     (ttp_equity | ftmo_cfd | topstep_futures)
+    symbols          : list of tickers to check; None = all symbols in DB
+    dry_run          : if True, compute but do not write to DB
+    debug_symbol     : if set, print detailed trace for this symbol
+    universe_name    : universe key for per-universe thresholds
+    in_scope_symbols : Phase 2a enforce-mode filter. When provided, only
+                       symbols in this list are processed. If both symbols and
+                       in_scope_symbols are given, the intersection is used.
 
     Returns
     -------
     List of health result dicts.
     """
+    # Phase 2a: resolve effective symbol list
+    if in_scope_symbols is not None:
+        scope_set = {s.upper() for s in in_scope_symbols}
+        if symbols is not None:
+            symbols = [s for s in symbols if s.upper() in scope_set]
+        else:
+            symbols = [s.upper() for s in in_scope_symbols]
     db      = VanguardDB(DB_PATH)
-    now     = now_utc()
+    now = now_utc()
+    if is_replay_from_source_db():
+        replay_now = db.latest_bar_ts_utc("vanguard_bars_5m") or db.latest_bar_ts_utc("vanguard_bars_1m")
+        if replay_now:
+            now = _parse_utc(replay_now)
+            cycle_ts = cycle_ts or replay_now
     cycle_ts = cycle_ts or iso_utc(now)
 
     # Load per-universe thresholds from config
@@ -500,26 +587,36 @@ def run(
     try:
         for sym_row in targets:
             sym = sym_row["symbol"]
+            asset_class = str(sym_row.get("asset_class") or "").lower()
+            source_id = resolve_market_data_source_id(asset_class) if asset_class else ""
+            preferred_data_source = (
+                data_source_label_for_source_id(source_id) if source_id else sym_row.get("data_source")
+            )
+            effective_sym_row = dict(sym_row)
+            if preferred_data_source:
+                effective_sym_row["data_source"] = preferred_data_source
             bars_rows = conn.execute(
                 "SELECT bar_ts_utc, open, high, low, close, volume "
                 "FROM vanguard_bars_5m "
                 "WHERE symbol = ? "
-                "ORDER BY bar_ts_utc DESC "
+                + ("AND data_source = ? " if preferred_data_source else "")
+                + "ORDER BY bar_ts_utc DESC "
                 "LIMIT ?",
-                (sym, BARS_TO_FETCH),
+                ((sym, preferred_data_source, BARS_TO_FETCH) if preferred_data_source else (sym, BARS_TO_FETCH)),
             ).fetchall()
             bars = [dict(r) for r in reversed(bars_rows)]
             bars_1m_rows = conn.execute(
                 "SELECT bar_ts_utc, open, high, low, close, volume, tick_volume "
                 "FROM vanguard_bars_1m "
                 "WHERE symbol = ? "
-                "ORDER BY bar_ts_utc DESC "
+                + ("AND data_source = ? " if preferred_data_source else "")
+                + "ORDER BY bar_ts_utc DESC "
                 "LIMIT ?",
-                (sym, BARS_TO_FETCH_1M),
+                ((sym, preferred_data_source, BARS_TO_FETCH_1M) if preferred_data_source else (sym, BARS_TO_FETCH_1M)),
             ).fetchall()
             bars_1m = [dict(r) for r in reversed(bars_1m_rows)]
 
-            result = check_symbol(sym_row, bars, bars_1m, now, thresholds=thresholds)
+            result = check_symbol(effective_sym_row, bars, bars_1m, now, thresholds=thresholds)
             result["cycle_ts_utc"] = cycle_ts
             results.append(result)
 

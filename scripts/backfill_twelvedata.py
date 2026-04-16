@@ -28,12 +28,14 @@ Location: ~/SS/Vanguard/scripts/backfill_twelvedata.py
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import logging
 import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Deque
 
 # ---------------------------------------------------------------------------
 # Bootstrap repo path + load .env
@@ -61,7 +63,41 @@ logger = logging.getLogger("backfill_twelvedata")
 _MAX_OUTPUTSIZE    = 5000          # Twelve Data Grow plan cap per request
 _MINUTES_PER_DAY   = 1440          # 24h × 60m (forex/crypto run 24h)
 _INTER_SYMBOL_SLEEP = 1.0          # seconds between symbols (rate-limit pacing)
-_INTER_PAGE_SLEEP   = 1.5          # seconds between paginated requests for same symbol
+_INTER_PAGE_SLEEP   = 0.25         # small gap between paginated requests for same symbol
+_RATE_LIMIT_SLEEP   = 65.0         # wait out Twelve Data per-minute credit window
+_RATE_LIMIT_RETRIES = 10
+_DEFAULT_MAX_CALLS_PER_MINUTE = 55
+_RATE_WINDOW_SECONDS = 60.0
+_RATE_PACER_EPSILON = 0.25
+_SUPPORTED_INTERVALS = {
+    "1min": 1,
+    "5min": 5,
+}
+
+
+class RequestPacer:
+    def __init__(self, max_calls_per_minute: int) -> None:
+        self.max_calls_per_minute = max_calls_per_minute
+        self.request_times: Deque[float] = deque()
+
+    def wait_for_slot(self) -> None:
+        while True:
+            now = time.monotonic()
+            while self.request_times and (now - self.request_times[0]) >= _RATE_WINDOW_SECONDS:
+                self.request_times.popleft()
+
+            if len(self.request_times) < self.max_calls_per_minute:
+                self.request_times.append(now)
+                return
+
+            sleep_for = _RATE_WINDOW_SECONDS - (now - self.request_times[0]) + _RATE_PACER_EPSILON
+            sleep_for = max(sleep_for, _RATE_PACER_EPSILON)
+            logger.info(
+                "[backfill] Request budget exhausted (%d/min); sleeping %.2fs",
+                self.max_calls_per_minute,
+                sleep_for,
+            )
+            time.sleep(sleep_for)
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +109,8 @@ def backfill_symbol_paginated(
     symbol: str,
     start_date: str,
     end_date: str,
+    pacer: RequestPacer,
+    interval: str,
 ) -> int:
     """
     Backfill a symbol over an arbitrary date range, paginating if needed.
@@ -86,19 +124,52 @@ def backfill_symbol_paginated(
     total_written  = 0
     current_end    = end_date
     start_dt       = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    interval_minutes = _SUPPORTED_INTERVALS[interval]
 
     while True:
-        logger.info("[backfill] %s — fetching up to %d bars ending %s",
-                    symbol, _MAX_OUTPUTSIZE, current_end)
-        written = adapter.fetch_historical(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=current_end,
-            outputsize=_MAX_OUTPUTSIZE,
-        )
+        written = 0
+        rate_limited = False
+        for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
+            logger.info(
+                "[backfill] %s — fetching up to %d bars ending %s (attempt %d/%d)",
+                symbol,
+                _MAX_OUTPUTSIZE,
+                current_end,
+                attempt,
+                _RATE_LIMIT_RETRIES,
+            )
+            pacer.wait_for_slot()
+            prev_error_count = len(getattr(adapter, "_last_errors", []))
+            written = adapter.fetch_historical(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=current_end,
+                outputsize=_MAX_OUTPUTSIZE,
+                interval=interval,
+            )
+            last_errors = getattr(adapter, "_last_errors", [])
+            new_errors = last_errors[prev_error_count:]
+            last_error = str(new_errors[-1]) if new_errors else ""
+            rate_limited = "API credits" in last_error or "current minute" in last_error
+            if not rate_limited:
+                break
+            logger.warning(
+                "[backfill] %s — Twelve Data minute limit hit; sleeping %.0fs before retry",
+                symbol,
+                _RATE_LIMIT_SLEEP,
+            )
+            time.sleep(_RATE_LIMIT_SLEEP)
         total_written += written
         logger.info("[backfill] %s — wrote %d bars (total so far: %d)",
                     symbol, written, total_written)
+
+        if rate_limited and written == 0:
+            logger.error(
+                "[backfill] %s — exhausted rate-limit retries at page ending %s",
+                symbol,
+                current_end,
+            )
+            break
 
         # If fewer bars returned than the cap, we've reached the start of history
         if written < _MAX_OUTPUTSIZE:
@@ -107,7 +178,7 @@ def backfill_symbol_paginated(
         # Estimate the earliest bar timestamp: outputsize bars at 1min each
         # Push current_end back by that many minutes to fetch the next page
         # We parse the start_date boundary to avoid infinite looping
-        bars_span_seconds = written * 60
+        bars_span_seconds = written * interval_minutes * 60
         new_end_dt = datetime.strptime(current_end, "%Y-%m-%d %H:%M:%S").replace(
             tzinfo=timezone.utc
         ) - timedelta(seconds=bars_span_seconds)
@@ -180,6 +251,20 @@ def build_parser() -> argparse.ArgumentParser:
         dest="dry_run",
         help="Print what would be fetched without making API calls.",
     )
+    p.add_argument(
+        "--max-calls-per-minute",
+        type=int,
+        default=_DEFAULT_MAX_CALLS_PER_MINUTE,
+        dest="max_calls_per_minute",
+        help="Rolling Twelve Data request budget per minute (default: 55).",
+    )
+    p.add_argument(
+        "--interval",
+        type=str,
+        default="5min",
+        choices=sorted(_SUPPORTED_INTERVALS.keys()),
+        help="Historical interval to download (default: 5min).",
+    )
     return p
 
 
@@ -240,6 +325,8 @@ def main() -> None:
         symbol_map = dict(adapter.symbols)
 
     logger.info("[backfill] %d symbol(s) to backfill", len(symbol_map))
+    logger.info("[backfill] Request pacing: max %d calls/minute", args.max_calls_per_minute)
+    logger.info("[backfill] Historical interval: %s", args.interval)
 
     if args.dry_run:
         logger.info("[backfill] DRY RUN — would backfill:")
@@ -250,6 +337,7 @@ def main() -> None:
     # Run backfill
     grand_total = 0
     errors      = []
+    pacer = RequestPacer(max_calls_per_minute=args.max_calls_per_minute)
 
     for i, (symbol, asset_class) in enumerate(sorted(symbol_map.items()), start=1):
         logger.info("[backfill] [%d/%d] %s (%s)", i, len(symbol_map), symbol, asset_class)
@@ -259,6 +347,8 @@ def main() -> None:
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date + " 23:59:59",
+                pacer=pacer,
+                interval=args.interval,
             )
             grand_total += written
             logger.info("[backfill] %s: %d bars total", symbol, written)

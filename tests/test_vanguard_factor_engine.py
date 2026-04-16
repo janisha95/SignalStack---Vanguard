@@ -32,6 +32,7 @@ from stages.vanguard_factor_engine import (
     _load_bars_df,
     _EXPECTED_FEATURES,
     FACTOR_MODULES,
+    _merge_matrix_features,
 )
 
 UTC = timezone.utc
@@ -312,6 +313,40 @@ class TestComputeFeatures(unittest.TestCase):
         for k in _EXPECTED_FEATURES:
             self.assertIn(k, result)
             self.assertTrue(math.isnan(result[k]))
+
+    def test_crypto_merge_preserves_base_volume_delta_when_vp_missing(self):
+        features = {"volume_delta": 0.42, "momentum_3bar": 1.0}
+        vp_vals = {
+            "poc": None,
+            "vah": None,
+            "val": None,
+            "poc_distance": None,
+            "vah_distance": None,
+            "val_distance": None,
+            "vp_skew": None,
+            "volume_delta": None,
+            "cum_delta": None,
+            "delta_divergence": None,
+        }
+        merged = _merge_matrix_features("crypto", features, vp_vals)
+        self.assertEqual(merged["volume_delta"], 0.42)
+
+    def test_forex_merge_still_allows_vp_volume_delta_override(self):
+        features = {"volume_delta": 0.42, "momentum_3bar": 1.0}
+        vp_vals = {
+            "poc": None,
+            "vah": None,
+            "val": None,
+            "poc_distance": None,
+            "vah_distance": None,
+            "val_distance": None,
+            "vp_skew": None,
+            "volume_delta": -0.17,
+            "cum_delta": None,
+            "delta_divergence": None,
+        }
+        merged = _merge_matrix_features("forex", features, vp_vals)
+        self.assertEqual(merged["volume_delta"], -0.17)
 
 
 # ---------------------------------------------------------------------------
