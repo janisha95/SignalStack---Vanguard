@@ -52,21 +52,26 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from vanguard.helpers.clock import now_et, now_utc, iso_utc, round_down_5m, utc_to_et
+from vanguard.helpers.account_truth import fetch_latest_context_account_row
 from vanguard.config.runtime_config import (
     _DEFAULT_CONFIG_PATH,
+    binding_allows_legacy,
     get_data_sources_config,
     get_execution_config,
     get_market_data_config,
     get_runtime_config,
+    get_shadow_gate_config,
     get_shadow_db_path,
     is_replay_from_source_db,
     load_runtime_config,
+    resolve_exit_policy_id,
     resolve_market_data_source_id,
+    resolve_profile_lane_binding,
 )
 from vanguard.helpers.bars import aggregate_1m_to_5m, aggregate_1m_to_timeframe, aggregate_5m_to_1h, parse_utc
 from vanguard.helpers.db import VanguardDB, checkpoint_wal_truncate, sqlite_conn, warn_if_large_wal
 from vanguard.helpers.eod_flatten import check_eod_action, get_positions_to_flatten
-from vanguard.helpers.universe_builder import materialize_universe_members
+from vanguard.helpers.universe_builder import classify_asset_class, materialize_universe_members
 from vanguard.data_adapters.alpaca_adapter import AlpacaAdapter, AlpacaWSAdapter, get_active_equity_symbols
 from vanguard.data_adapters.ibkr_adapter import IBKRAdapter, IBKRStreamingAdapter
 from vanguard.data_adapters.twelvedata_adapter import TwelveDataAdapter, load_from_config as load_twelvedata_adapter
@@ -79,6 +84,7 @@ from vanguard.execution.trade_journal import (
     update_submitted as _journal_update_submitted,
     update_filled as _journal_update_filled,
     update_rejected_by_broker as _journal_update_rejected,
+    update_skipped_before_submit as _journal_update_skipped_before_submit,
 )
 from vanguard.execution.forward_checkpoints import (
     ensure_table as _forward_checkpoints_ensure_table,
@@ -109,6 +115,12 @@ from scripts.dwx_live_context_daemon import (
     _resolve_suffix as _dwx_resolve_default_suffix,
     _resolve_symbol_suffix_map as _dwx_resolve_symbol_suffix_map,
 )
+from scripts.metaapi_live_context_daemon import (
+    collect_once as _metaapi_collect_context_once,
+)
+from vanguard.execution.metaapi_context_adapter import MetaApiContextAdapter
+from vanguard.execution.metaapi_client import MetaApiUnavailable
+from vanguard.analytics.cycle_audit import refresh_cycle_audit as _refresh_cycle_audit
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -128,6 +140,7 @@ logger = logging.getLogger("vanguard_orchestrator")
 _DB_PATH = get_shadow_db_path()
 _IBKR_INTRADAY_DB = str(_REPO_ROOT / "data" / "ibkr_intraday.db")
 _EXEC_CFG_PATH = _REPO_ROOT / "config" / "vanguard_execution_config.json"
+_CYCLE_TRACE_PATH = _REPO_ROOT / "data" / "operator_logs" / "vanguard_cycle_trace.jsonl"
 _LOOP_LOCK_FH = None
 
 # ---------------------------------------------------------------------------
@@ -144,6 +157,7 @@ DEFAULT_NO_NEW_AFTER  = "15:45"
 UNIVERSE_REFRESH_TIMES = {"09:35", "12:00", "15:00"}
 TELEGRAM_CHUNK_LIMIT = int(get_runtime_config().get("telegram", {}).get("max_message_chars", 3500))
 _MTF_INTRADAY_MINUTES = (10, 15, 30)
+_V1_PRECOMPUTE_SERVICE_NAME = "v1_precompute"
 
 
 def _infer_model_family(model_source: Any) -> Optional[str]:
@@ -317,7 +331,7 @@ def _load_accounts(db_path: str = _DB_PATH) -> list[dict]:
         for p in json_profiles:
             accounts.append({
                 "id":               str(p.get("id") or ""),
-                "name":             str(p.get("id") or ""),  # fallback: use id as name
+                "name":             str(p.get("name") or p.get("display_name") or p.get("id") or ""),
                 "is_active":        1,
                 "policy_id":        str(p.get("policy_id") or ""),
                 "risk_profile_id":  str(p.get("risk_profile_id") or ""),
@@ -326,6 +340,13 @@ def _load_accounts(db_path: str = _DB_PATH) -> list[dict]:
                 "context_source_id": str(p.get("context_source_id") or ""),
                 "context_health_mode": str(p.get("context_health_mode") or ""),
                 "execution_mode":   str(p.get("execution_mode") or ""),
+                "execution_mode_by_asset_class": dict(p.get("execution_mode_by_asset_class") or {}),
+                "asset_lanes":      dict(p.get("asset_lanes") or {}),
+                "live_allowed_asset_classes": [
+                    str(asset).strip()
+                    for asset in (p.get("live_allowed_asset_classes") or [])
+                    if str(asset).strip()
+                ],
                 "environment":      str(p.get("environment") or "prod"),
                 "execution_bridge": str(p.get("execution_bridge") or ""),
                 "must_close_eod":   int(p.get("must_close_eod") or 0),
@@ -356,7 +377,6 @@ def _resolve_active_mt5_local_config(runtime_cfg: dict[str, Any] | None = None) 
     cfg = runtime_cfg or get_runtime_config()
     profiles = cfg.get("profiles") or []
     context_sources = cfg.get("context_sources") or {}
-    legacy = dict((cfg.get("data_sources") or {}).get("mt5_local") or {})
 
     for profile in profiles:
         if str(profile.get("is_active") or "").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -372,16 +392,8 @@ def _resolve_active_mt5_local_config(runtime_cfg: dict[str, Any] | None = None) 
         source_cfg["_profile_id"] = str(profile.get("id") or "")
         return source_cfg
 
-    for source_id, source_cfg in (context_sources or {}).items():
-        source_cfg = dict(source_cfg or {})
-        if not source_cfg or not bool(source_cfg.get("enabled", False)):
-            continue
-        if str(source_cfg.get("source_type") or "").lower() != "dwx_mt5":
-            continue
-        source_cfg["_source_id"] = str(source_id)
-        return source_cfg
-
-    return legacy
+    # Keep V1 off DWX unless an active profile explicitly requires mt5_local.
+    return {}
 
 
 def _ensure_execution_log(db_path: str = _DB_PATH) -> None:
@@ -419,6 +431,36 @@ def _ensure_execution_log(db_path: str = _DB_PATH) -> None:
     """
     with sqlite_conn(db_path) as con:
         con.execute(create_sql)
+        con.commit()
+
+
+def _ensure_execution_attempts(db_path: str = _DB_PATH) -> None:
+    """Ensure the canonical per-approved execution-attempt fact table exists."""
+    create_sql = """
+    CREATE TABLE IF NOT EXISTS vanguard_execution_attempts (
+        attempt_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        cycle_ts_utc          TEXT NOT NULL,
+        profile_id            TEXT NOT NULL,
+        decision_stream_id    TEXT,
+        trade_id              TEXT,
+        symbol                TEXT NOT NULL,
+        direction             TEXT NOT NULL,
+        execution_mode        TEXT NOT NULL,
+        execution_bridge      TEXT NOT NULL,
+        attempt_status        TEXT NOT NULL,
+        reason_code           TEXT,
+        broker_order_id       TEXT,
+        broker_position_id    TEXT,
+        response_json         TEXT NOT NULL DEFAULT '{}',
+        created_at_utc        TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_execution_attempts_cycle_profile
+        ON vanguard_execution_attempts(cycle_ts_utc, profile_id, symbol, direction);
+    CREATE INDEX IF NOT EXISTS idx_execution_attempts_trade
+        ON vanguard_execution_attempts(trade_id, created_at_utc);
+    """
+    with sqlite_conn(db_path) as con:
+        con.executescript(create_sql)
         con.commit()
 
 
@@ -469,6 +511,57 @@ def _write_execution_row(
         return None
 
 
+def _write_execution_attempt(
+    *,
+    cycle_ts_utc: str,
+    profile_id: str,
+    decision_stream_id: str | None,
+    trade_id: str | None,
+    symbol: str,
+    direction: str,
+    execution_mode: str,
+    execution_bridge: str,
+    attempt_status: str,
+    reason_code: str | None = None,
+    broker_order_id: str | None = None,
+    broker_position_id: str | None = None,
+    response_json: dict[str, Any] | None = None,
+    db_path: str = _DB_PATH,
+) -> Optional[int]:
+    """Write one final execution-attempt outcome for an approved trade candidate."""
+    try:
+        with sqlite_conn(db_path) as con:
+            cur = con.execute(
+                """
+                INSERT INTO vanguard_execution_attempts
+                    (cycle_ts_utc, profile_id, decision_stream_id, trade_id, symbol, direction,
+                     execution_mode, execution_bridge, attempt_status, reason_code,
+                     broker_order_id, broker_position_id, response_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cycle_ts_utc,
+                    profile_id,
+                    decision_stream_id,
+                    trade_id,
+                    symbol,
+                    direction,
+                    execution_mode,
+                    execution_bridge,
+                    attempt_status,
+                    reason_code,
+                    broker_order_id,
+                    broker_position_id,
+                    json.dumps(response_json or {}, sort_keys=True, default=str),
+                ),
+            )
+            con.commit()
+            return cur.lastrowid
+    except Exception as exc:
+        logger.error("Failed to write vanguard_execution_attempts: %s", exc)
+        return None
+
+
 def _get_approved_rows(db_path: str = _DB_PATH, cycle_ts: str | None = None) -> list[dict]:
     """Load APPROVED rows from vanguard_tradeable_portfolio, scoped to cycle when provided."""
     try:
@@ -493,6 +586,33 @@ def _get_approved_rows(db_path: str = _DB_PATH, cycle_ts: str | None = None) -> 
         return [dict(r) for r in rows]
     except Exception as exc:
         logger.warning(f"Could not load approved rows: {exc}")
+        return []
+
+
+def _get_tradeable_rows(db_path: str = _DB_PATH, cycle_ts: str | None = None) -> list[dict]:
+    """Load all tradeable-portfolio rows for a cycle."""
+    try:
+        with sqlite_conn(db_path) as con:
+            con.row_factory = sqlite3.Row
+            latest_cycle = cycle_ts
+            if not latest_cycle:
+                row = con.execute(
+                    "SELECT MAX(cycle_ts_utc) AS latest FROM vanguard_tradeable_portfolio"
+                ).fetchone()
+                if not row or not row["latest"]:
+                    return []
+                latest_cycle = row["latest"]
+            rows = con.execute(
+                """
+                SELECT * FROM vanguard_tradeable_portfolio
+                WHERE cycle_ts_utc = ?
+                ORDER BY account_id, symbol, direction
+                """,
+                (latest_cycle,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.warning("Could not load tradeable rows: %s", exc)
         return []
 
 
@@ -522,6 +642,7 @@ class VanguardOrchestrator:
         equity_data_source: str = "auto",
         force_assets: str | None = None,
         cycle_interval_seconds: int = CYCLE_MINUTES * 60,
+        cycle_offset_seconds: int = 0,
         force_cycle_ts: str | None = None,
         no_telegram: bool = False,
         _now_et_fn: Optional[Callable[[], datetime]] = None,
@@ -529,6 +650,8 @@ class VanguardOrchestrator:
     ):
         boot_t0 = time.time()
         execution_mode = _normalize_execution_mode(execution_mode)
+        if dry_run:
+            execution_mode = "test"
         if execution_mode not in ("manual", "live", "test"):
             raise ValueError(
                 f"Invalid execution_mode: {execution_mode!r}. Use manual/live/test"
@@ -551,6 +674,7 @@ class VanguardOrchestrator:
             if asset.strip()
         }
         self.cycle_interval_seconds = max(int(cycle_interval_seconds), 1)
+        self.cycle_offset_seconds = max(int(cycle_offset_seconds), 0) % (CYCLE_MINUTES * 60)
 
         # Injectable time functions for testability
         self._now_et  = _now_et_fn  if _now_et_fn  is not None else now_et
@@ -568,6 +692,8 @@ class VanguardOrchestrator:
         self._shutdown_requested   = False
         self._last_universe_refresh: str | None = None
         self.last_cycle_duration:  float = 0.0
+        self._cycle_trace_path = _CYCLE_TRACE_PATH
+        self._active_cycle_trace: dict[str, Any] | None = None
         self._shortlist_direction_history = defaultdict(lambda: deque(maxlen=5))
         self._current_resolved_universe = None  # set each cycle by resolve_universe_for_cycle
 
@@ -650,6 +776,124 @@ class VanguardOrchestrator:
         )
         logger.info("[BOOT] __init__ total took %.2fs", time.time() - boot_t0)
 
+    def _ensure_cycle_trace_parent(self) -> None:
+        self._cycle_trace_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _start_cycle_trace(self, cycle_ts: str) -> None:
+        runner_cfg = self._load_execution_policy_runner_config("forex")
+        self._active_cycle_trace = {
+            "record_type": "cycle_trace",
+            "cycle_ts_utc": str(cycle_ts or ""),
+            "started_at_utc": iso_utc(self._now_utc()),
+            "execution_mode": self.execution_mode,
+            "dry_run": bool(self.dry_run),
+            "config_version": str((self._runtime_config or {}).get("config_version") or ""),
+            "profiles": [str(account.get("id") or "") for account in (self._accounts or [])],
+            "live_policy_id": str(runner_cfg.get("live_policy_id") or ""),
+            "throughput_mode": self._throughput_mode_summary(),
+            "tactical_bans": self._tactical_bans_summary("forex"),
+            "stage_timings": {},
+            "pipeline": {},
+            "execution": {},
+            "shadow_eval": {},
+            "telegram_events": [],
+        }
+
+    def _record_cycle_trace_result(self, result: dict[str, Any]) -> None:
+        if not self._active_cycle_trace:
+            return
+        self._active_cycle_trace["pipeline"] = {
+            "status": str(result.get("status") or ""),
+            "v1_cache_used": bool(result.get("v1_cache_used")),
+            "v1_source_health": result.get("v1_source_health"),
+            "v2_rows": result.get("v2_rows"),
+            "v2_survivors": result.get("v2_survivors"),
+            "v3_symbols": result.get("v3_symbols"),
+            "v4b_status": result.get("v4b_status"),
+            "v4b_rows": result.get("v4b_rows"),
+            "v5_status": result.get("v5_status"),
+            "v5_candidates": result.get("v5_candidates"),
+            "v6_status": result.get("v6_status"),
+            "v6_rows": result.get("v6_rows"),
+            "approved": result.get("approved"),
+        }
+        self._active_cycle_trace["stage_timings"] = dict(result.get("stage_timings") or {})
+        if result.get("context_refresh"):
+            self._active_cycle_trace["context_refresh"] = result.get("context_refresh")
+
+    def _record_cycle_trace_execution(self, cycle_ts: str, summary: dict[str, Any]) -> None:
+        if not self._active_cycle_trace:
+            return
+        if str(self._active_cycle_trace.get("cycle_ts_utc") or "") != str(cycle_ts or ""):
+            return
+        self._active_cycle_trace["execution"] = summary
+
+    def _record_cycle_trace_shadow(self, cycle_ts: str, summary: dict[str, Any]) -> None:
+        if not self._active_cycle_trace:
+            return
+        if str(self._active_cycle_trace.get("cycle_ts_utc") or "") != str(cycle_ts or ""):
+            return
+        self._active_cycle_trace["shadow_eval"] = dict(summary or {})
+
+    def _record_cycle_trace_error(self, exc: Exception) -> None:
+        if not self._active_cycle_trace:
+            return
+        self._active_cycle_trace["error"] = str(exc)
+
+    def _upsert_orchestrator_service_state(
+        self,
+        *,
+        status: str,
+        cycle_ts_utc: str | None = None,
+        error: Exception | str | None = None,
+    ) -> None:
+        try:
+            now_ts = iso_utc(self._now_utc())
+            details: dict[str, Any] = {
+                "execution_mode": str(self.execution_mode or ""),
+            }
+            if cycle_ts_utc:
+                details["cycle_ts_utc"] = str(cycle_ts_utc)
+            if error is not None:
+                details["last_error"] = str(error)
+            self._vg_db.upsert_service_state(
+                "orchestrator",
+                status=str(status or "OK"),
+                updated_ts_utc=now_ts,
+                last_success_ts_utc=now_ts if str(status or "").upper() == "OK" else None,
+                last_error_ts_utc=now_ts if error is not None else None,
+                pid=os.getpid(),
+                details=details,
+            )
+        except Exception as _svc_exc:  # noqa: BLE001
+            logger.debug("orchestrator service-state upsert failed: %s", _svc_exc)
+
+    def _record_cycle_trace_telegram(self, message: str, message_type: str | None, chunk_count: int) -> None:
+        if not self._active_cycle_trace:
+            return
+        preview = str(message or "").strip().replace("\n", " ")
+        self._active_cycle_trace.setdefault("telegram_events", []).append(
+            {
+                "ts_utc": iso_utc(self._now_utc()),
+                "message_type": str(message_type or ""),
+                "chars": len(message or ""),
+                "chunks": int(chunk_count),
+                "preview": preview[:240],
+            }
+        )
+
+    def _flush_cycle_trace(self, *, status: str) -> None:
+        if not self._active_cycle_trace:
+            return
+        trace = dict(self._active_cycle_trace)
+        trace["final_status"] = str(status or "")
+        trace["finished_at_utc"] = iso_utc(self._now_utc())
+        self._ensure_cycle_trace_parent()
+        with self._cycle_trace_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(trace, default=str))
+            fh.write("\n")
+        self._active_cycle_trace = None
+
     # ------------------------------------------------------------------
     # Startup validation
     # ------------------------------------------------------------------
@@ -665,7 +909,7 @@ class VanguardOrchestrator:
         if not profiles:
             msg = "[V7] FATAL: No active account profiles found. Cannot execute trades."
             logger.error(msg)
-            self._send_telegram(f"🔴 {msg}")
+            self._send_telegram(f"🔴 {msg}", message_type="ERROR")
             raise RuntimeError(msg)
 
         logger.info("[V7] %d active profile(s):", len(profiles))
@@ -733,9 +977,255 @@ class VanguardOrchestrator:
         if elapsed > max_lag:
             msg = f"[V7] CYCLE LAG: {elapsed:.0f}s exceeds {max_lag}s limit"
             logger.warning(msg)
-            self._send_telegram(f"⚠️ {msg}")
+            self._send_telegram(f"⚠️ {msg}", message_type="EXECUTION_RUN")
         else:
             logger.info("[V7] Cycle completed in %.1fs", elapsed)
+
+    def _get_v1_precompute_config(self) -> dict[str, Any]:
+        runtime_cfg = (self._runtime_config or {}).get("runtime") or {}
+        cfg = dict(runtime_cfg.get("v1_precompute") or {})
+        cfg.setdefault("enabled", False)
+        cfg.setdefault("freshness_seconds", max(int(self.cycle_interval_seconds * 2), 300))
+        cfg.setdefault("interval_seconds", self.cycle_interval_seconds)
+        return cfg
+
+    def _resolve_runtime_universe_for_cycle(self, cycle_ts: str) -> list[str] | None:
+        in_scope_symbols: list[str] | None = None
+        self._current_resolved_universe = None
+        if self._runtime_config is None:
+            return None
+        try:
+            from vanguard.accounts.runtime_universe import resolve_universe_for_cycle
+            from datetime import timezone as _tz
+
+            cycle_dt = parse_utc(cycle_ts).replace(tzinfo=_tz.utc)
+            self._current_resolved_universe = resolve_universe_for_cycle(
+                self._runtime_config, cycle_dt, force_assets=set(self._force_assets)
+            )
+            ru = self._current_resolved_universe
+            logger.info(
+                "[Phase2a] Resolved universe: mode=%s profiles=%s classes=%s symbols=%d",
+                ru.mode, ru.active_profile_ids, ru.expected_asset_classes, len(ru.in_scope_symbols),
+            )
+            self._write_resolved_universe_log(ru)
+            if ru.mode == "enforce":
+                in_scope_symbols = ru.in_scope_symbols
+            else:
+                logger.info(
+                    "[Phase2a] OBSERVE mode — pipeline unconstrained. "
+                    "WOULD have filtered to %d symbols: %s",
+                    len(ru.in_scope_symbols), ru.in_scope_symbols[:10],
+                )
+        except Exception as exc:
+            logger.warning("[Phase2a] Universe resolver failed: %s — continuing without filter", exc)
+        return in_scope_symbols
+
+    def _build_v1_precompute_details(self, cycle_ts: str, in_scope_symbols: list[str] | None, v1_result: dict[str, int]) -> dict[str, Any]:
+        ru = getattr(self, "_current_resolved_universe", None)
+        expected_asset_classes = list(getattr(ru, "expected_asset_classes", []) or [])
+        return {
+            "cycle_ts_utc": cycle_ts,
+            "resolved_mode": getattr(ru, "mode", None),
+            "expected_asset_classes": expected_asset_classes,
+            "in_scope_symbol_count": len(getattr(ru, "in_scope_symbols", []) or []),
+            "in_scope_symbols": list(getattr(ru, "in_scope_symbols", []) or []),
+            "enforced_symbols": list(in_scope_symbols or []),
+            "primary_sources": self._resolved_primary_sources_for_asset_classes(expected_asset_classes),
+            "runtime_details": dict(getattr(self, "_last_v1_runtime_details", {}) or {}),
+            "v1_result": dict(v1_result),
+        }
+
+    def _load_v1_precompute_state(self) -> dict[str, Any] | None:
+        try:
+            return self._vg_db.get_service_state(_V1_PRECOMPUTE_SERVICE_NAME)
+        except Exception as exc:
+            logger.warning("[V1 cache] failed to load service state: %s", exc)
+            return None
+
+    def _is_v1_precompute_state_fresh(self, state: dict[str, Any] | None) -> bool:
+        if not state or str(state.get("status") or "").lower() != "ok":
+            return False
+        cfg = self._get_v1_precompute_config()
+        last_success_ts = str(state.get("last_success_ts_utc") or "").strip()
+        if not last_success_ts:
+            return False
+        try:
+            age_s = int((self._now_utc() - parse_utc(last_success_ts)).total_seconds())
+        except Exception:
+            return False
+        if age_s > int(cfg.get("freshness_seconds") or 0):
+            return False
+        details = state.get("details") or {}
+        cached_symbols = [str(symbol).upper() for symbol in (details.get("in_scope_symbols") or [])]
+        current_ru = getattr(self, "_current_resolved_universe", None)
+        current_symbols = [str(symbol).upper() for symbol in (getattr(current_ru, "in_scope_symbols", []) or [])]
+        if cached_symbols != current_symbols:
+            return False
+        cached_asset_classes = sorted(str(asset).lower() for asset in (details.get("expected_asset_classes") or []))
+        current_asset_classes = sorted(str(asset).lower() for asset in (getattr(current_ru, "expected_asset_classes", []) or []))
+        if cached_asset_classes != current_asset_classes:
+            return False
+        cached_mode = str(details.get("resolved_mode") or "")
+        current_mode = str(getattr(current_ru, "mode", "") or "")
+        if cached_mode != current_mode:
+            return False
+        cached_sources = {
+            str(asset).lower(): str(source)
+            for asset, source in ((details.get("primary_sources") or {}).items())
+        }
+        current_sources = self._resolved_primary_sources_for_asset_classes(current_asset_classes)
+        if cached_sources != current_sources:
+            return False
+        return isinstance(details.get("v1_result"), dict)
+
+    def _resolved_primary_sources_for_asset_classes(self, asset_classes: list[str] | set[str]) -> dict[str, str]:
+        runtime_cfg = self._runtime_config or get_runtime_config()
+        sources: dict[str, str] = {}
+        for asset_class in sorted({str(asset).strip().lower() for asset in (asset_classes or []) if str(asset).strip()}):
+            source_id = resolve_market_data_source_id(asset_class, runtime_config=runtime_cfg)
+            if source_id:
+                sources[asset_class] = str(source_id)
+        return sources
+
+    def _active_profile_ids(self) -> list[str]:
+        ru = getattr(self, "_current_resolved_universe", None)
+        active_from_cycle = [str(profile_id) for profile_id in (getattr(ru, "active_profile_ids", []) or []) if str(profile_id).strip()]
+        if active_from_cycle:
+            return active_from_cycle
+        return [str(account.get("id") or "") for account in (self._accounts or []) if str(account.get("id") or "").strip()]
+
+    def _get_active_runtime_symbols_for_asset_class(self, asset_class: str) -> list[str]:
+        normalized_asset = str(asset_class or "").strip().lower()
+        if not normalized_asset:
+            return []
+        ru = getattr(self, "_current_resolved_universe", None)
+        if ru is not None:
+            scoped = [
+                _canonical_symbol(symbol)
+                for symbol in (getattr(ru, "in_scope_symbols", []) or [])
+                if classify_asset_class(_canonical_symbol(symbol)) == normalized_asset
+            ]
+            return sorted({symbol for symbol in scoped if symbol})
+
+        symbols: set[str] = set()
+        for profile_id in self._active_profile_ids():
+            symbols.update(self._get_runtime_universe_symbols(profile_id, normalized_asset))
+        return sorted(symbols)
+
+    def _build_mt5_asset_coverage(self, asset_class: str) -> dict[str, Any] | None:
+        normalized_asset = str(asset_class or "").strip().lower()
+        runtime_cfg = self._runtime_config or get_runtime_config()
+        if resolve_market_data_source_id(normalized_asset, runtime_config=runtime_cfg) != "mt5_local":
+            return None
+
+        expected_symbols = self._get_active_runtime_symbols_for_asset_class(normalized_asset)
+        if not expected_symbols:
+            return None
+
+        mt5_details = dict(((getattr(self, "_last_v1_runtime_details", {}) or {}).get("mt5_poll_details") or {}))
+        requested = {_canonical_symbol(symbol) for symbol in (mt5_details.get("requested_symbols") or []) if _canonical_symbol(symbol)}
+        successful = {_canonical_symbol(symbol) for symbol in (mt5_details.get("successful_symbols") or []) if _canonical_symbol(symbol)}
+        failed = {_canonical_symbol(symbol) for symbol in (mt5_details.get("failed_symbols") or []) if _canonical_symbol(symbol)}
+        timed_out = {_canonical_symbol(symbol) for symbol in (mt5_details.get("timed_out_symbols") or []) if _canonical_symbol(symbol)}
+        active_profile_ids = self._active_profile_ids()
+        active_source_names = sorted(
+            {
+                str((((runtime_cfg.get("context_sources") or {}).get(str(profile.get("context_source_id") or "")) or {}).get("source") or "")).strip()
+                for profile in (self._accounts or [])
+                if str(profile.get("id") or "") in active_profile_ids
+            }
+        )
+        active_source_names = [name for name in active_source_names if name]
+
+        quote_symbols: set[str] = set()
+        spec_symbols: set[str] = set()
+        placeholders_profiles = ",".join("?" for _ in active_profile_ids)
+        placeholders_symbols = ",".join("?" for _ in expected_symbols)
+        placeholders_sources = ",".join("?" for _ in active_source_names)
+        with sqlite_conn(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            try:
+                source_clause = f"AND source IN ({placeholders_sources})" if active_source_names else ""
+                quote_rows = con.execute(
+                    f"""
+                    SELECT symbol
+                    FROM vanguard_context_quote_latest
+                    WHERE profile_id IN ({placeholders_profiles})
+                      AND symbol IN ({placeholders_symbols})
+                      {source_clause}
+                      AND UPPER(COALESCE(source_status, '')) = 'OK'
+                    """,
+                    [*active_profile_ids, *expected_symbols, *active_source_names],
+                ).fetchall()
+                quote_symbols = {_canonical_symbol(row["symbol"]) for row in quote_rows if row["symbol"]}
+            except sqlite3.OperationalError:
+                quote_symbols = set()
+            try:
+                source_clause = f"AND source IN ({placeholders_sources})" if active_source_names else ""
+                spec_rows = con.execute(
+                    f"""
+                    SELECT symbol
+                    FROM vanguard_context_symbol_specs
+                    WHERE profile_id IN ({placeholders_profiles})
+                      AND symbol IN ({placeholders_symbols})
+                      {source_clause}
+                      AND UPPER(COALESCE(source_status, '')) = 'OK'
+                    """,
+                    [*active_profile_ids, *expected_symbols, *active_source_names],
+                ).fetchall()
+                spec_symbols = {_canonical_symbol(row["symbol"]) for row in spec_rows if row["symbol"]}
+            except sqlite3.OperationalError:
+                spec_symbols = set()
+
+        symbol_details: list[dict[str, str]] = []
+        status_counts: Counter[str] = Counter()
+        for symbol in expected_symbols:
+            if symbol in timed_out:
+                status = "mt5_timeout"
+            elif symbol not in requested or symbol in failed or symbol not in successful:
+                status = "mt5_missing_bar_source"
+            elif symbol not in quote_symbols:
+                status = "mt5_context_missing"
+            elif symbol not in spec_symbols:
+                status = "mt5_spec_missing"
+            else:
+                status = "mt5_ok"
+            status_counts[status] += 1
+            symbol_details.append({"symbol": symbol, "status": status})
+
+        return {
+            "asset_class": normalized_asset,
+            "expected_symbols": expected_symbols,
+            "requested_symbols": sorted(requested),
+            "successful_symbols": sorted(successful),
+            "failed_symbols": sorted(failed),
+            "timed_out_symbols": sorted(timed_out),
+            "status_counts": dict(status_counts),
+            "symbols": symbol_details,
+        }
+
+    def _attach_mt5_coverage_details(self, result: dict[str, Any]) -> None:
+        runtime_cfg = self._runtime_config or get_runtime_config()
+        coverage: dict[str, Any] = {}
+        asset_classes = ("crypto", "metal")
+        if self._force_assets:
+            forced_mt5_assets = tuple(
+                asset_class
+                for asset_class in asset_classes
+                if asset_class in self._force_assets
+            )
+            if forced_mt5_assets:
+                asset_classes = forced_mt5_assets
+        for asset_class in asset_classes:
+            if resolve_market_data_source_id(asset_class, runtime_config=runtime_cfg) != "mt5_local":
+                continue
+            details = self._build_mt5_asset_coverage(asset_class)
+            if not details:
+                continue
+            coverage[asset_class] = details
+            logger.info("[MT5 COVERAGE] %s %s", asset_class.upper(), details.get("status_counts"))
+        if coverage:
+            result["mt5_coverage"] = coverage
 
     # ------------------------------------------------------------------
     # Adapter init
@@ -834,6 +1324,11 @@ class VanguardOrchestrator:
             ("NY", _get_timeout_policy_for_session("ny")),
             ("Asian", _get_timeout_policy_for_session("asian")),
         ]
+        if policies and all(
+            (not policy) or int(policy.get("dedupe_minutes") or 0) <= 0
+            for _label, policy in policies
+        ):
+            return ""
         parts = [
             f"{label} {int(policy['timeout_minutes'])}m (dedupe {int(policy['dedupe_minutes'])})"
             for label, policy in policies
@@ -842,6 +1337,73 @@ class VanguardOrchestrator:
         if not parts:
             return ""
         return "Session Policy: " + " | ".join(parts)
+
+    def _load_selection_telegram_config(self) -> dict[str, Any]:
+        override = getattr(self, "_selection_telegram_config_override", None)
+        if isinstance(override, dict):
+            return override
+        cached = getattr(self, "_selection_telegram_config_cache", None)
+        if isinstance(cached, dict):
+            return cached
+        cfg_path = _REPO_ROOT / "config" / "vanguard_v5_selection.json"
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+        except Exception as exc:
+            logger.debug("Could not load selection telegram config from %s: %s", cfg_path, exc)
+            loaded = {}
+        self._selection_telegram_config_cache = loaded
+        return loaded
+
+    def _build_selection_contract_summary(self) -> dict[str, str]:
+        cfg = self._load_selection_telegram_config()
+        defaults = cfg.get("defaults") or {}
+        pocket = defaults.get("pocket_filter") or {}
+        if not pocket or not bool(pocket.get("enabled")):
+            return {}
+
+        asset_classes = [
+            str(asset).strip().lower()
+            for asset in (pocket.get("apply_to_asset_classes") or ["forex"])
+            if str(asset).strip()
+        ]
+        asset_scope = "Forex only" if asset_classes == ["forex"] else "Assets " + "/".join(asset_classes)
+        require_primary = pocket.get("require_dedupe_primary")
+        require_primary_text = f"primary{int(require_primary)}" if str(require_primary or "").strip() else "primary dedupe off"
+        allowed_pairs = {
+            (str(direction).upper(), str(session).lower())
+            for direction, session in (pocket.get("allowed_session_directions") or [])
+            if isinstance(direction, str) and isinstance(session, str)
+        }
+        strict_pairs = {
+            ("LONG", "ny"),
+            ("LONG", "overlap"),
+            ("SHORT", "london"),
+            ("SHORT", "overlap"),
+        }
+        if not pocket.get("enabled"):
+            return {
+                "regime": "Regime: Pocket disabled",
+                "eligibility": f"Eligibility: {asset_scope} | {require_primary_text}",
+            }
+        if allowed_pairs == strict_pairs:
+            return {
+                "regime": "Regime: STRICT POCKET",
+                "eligibility": f"Eligibility: {asset_scope} | LONG ny/overlap | SHORT london/overlap | {require_primary_text}",
+            }
+        if not allowed_pairs:
+            return {
+                "regime": "Regime: PRIMARY-ONLY",
+                "eligibility": f"Eligibility: {asset_scope} | any session/direction | {require_primary_text}",
+            }
+        allowed_display = ", ".join(
+            f"{direction} {session}"
+            for direction, session in sorted(allowed_pairs, key=lambda item: (item[1], item[0]))
+        )
+        return {
+            "regime": "Regime: CUSTOM POCKET",
+            "eligibility": f"Eligibility: {asset_scope} | {allowed_display} | {require_primary_text}",
+        }
 
     def _load_thesis_display_state(
         self,
@@ -984,7 +1546,10 @@ class VanguardOrchestrator:
         if not bool(cfg.get("enabled", False)):
             return None
         bridge = str(profile.get("execution_bridge") or "").lower()
-        if not bridge.startswith("mt5_local"):
+        # Keep entry blocking aligned with lifecycle_daemon scheduled flatten:
+        # both MetaApi and local MT5 profiles should stop opening new trades
+        # once the flatten window has started.
+        if not (bridge.startswith("mt5_local") or bridge.startswith("metaapi")):
             return None
         eligible = {
             str(profile_id).strip()
@@ -1013,12 +1578,43 @@ class VanguardOrchestrator:
         if cfg is None:
             return False
         now_local = et or self._now_et()
+        allowed_days = {
+            int(day)
+            for day in (cfg.get("days") or [])
+            if str(day).strip() not in {"", "None"}
+        }
+        if allowed_days and now_local.weekday() not in allowed_days:
+            return False
         start_h, start_m = self._parse_hhmm(str(cfg.get("start_et")))
         end_h, end_m = self._parse_hhmm(str(cfg.get("end_et")))
         current_minutes = now_local.hour * 60 + now_local.minute
         start_minutes = start_h * 60 + start_m
         end_minutes = end_h * 60 + end_m
         return start_minutes <= current_minutes <= end_minutes
+
+    def _scheduled_flatten_window_note(self, account_id: str, et: datetime | None = None) -> str:
+        cfg = self._scheduled_flatten_config_for_account(account_id)
+        if cfg is None:
+            return ""
+        start_et = str(cfg.get("start_et") or "").strip()
+        end_et = str(cfg.get("end_et") or "").strip()
+        if not start_et or not end_et:
+            return ""
+        note = f"Intentional liquidity guard: no new entries {start_et}–{end_et} ET"
+        if self._scheduled_flatten_window_active(account_id, et=et):
+            return f"{note} (active now)"
+        return note
+
+    def _active_routing_pause_note(self, et: datetime | None = None) -> str:
+        now_local = et or self._now_et()
+        for account in self._accounts or []:
+            account_id = str(account.get("id") or "")
+            if not account_id:
+                continue
+            note = self._scheduled_flatten_window_note(account_id, et=now_local)
+            if note and self._scheduled_flatten_window_active(account_id, et=now_local):
+                return note
+        return ""
 
     @staticmethod
     def _pip_size_for_symbol(symbol: str) -> float:
@@ -1089,6 +1685,52 @@ class VanguardOrchestrator:
             )
         return snapshot
 
+    def _load_open_journal_positions_snapshot(self, profile_id: str) -> list[dict[str, Any]]:
+        try:
+            with sqlite_conn(self.db_path) as con:
+                con.row_factory = sqlite3.Row
+                rows = con.execute(
+                    """
+                    SELECT trade_id,
+                           broker_position_id,
+                           symbol,
+                           side,
+                           COALESCE(fill_qty, approved_qty) AS qty,
+                           COALESCE(realized_pnl, 0.0) AS realized_pnl,
+                           approved_cycle_ts_utc,
+                           submitted_at_utc,
+                           filled_at_utc
+                    FROM vanguard_trade_journal
+                    WHERE profile_id = ?
+                      AND (
+                            status = 'OPEN'
+                            OR (
+                                status = 'PENDING_FILL'
+                                AND COALESCE(submitted_at_utc, filled_at_utc, '') <> ''
+                            )
+                      )
+                    ORDER BY approved_cycle_ts_utc DESC
+                    """,
+                    (str(profile_id or ""),),
+                ).fetchall()
+        except Exception:
+            return []
+        snapshot: list[dict[str, Any]] = []
+        for row in rows:
+            snapshot.append(
+                {
+                    "ticket": str(row["broker_position_id"] or row["trade_id"] or ""),
+                    "broker_position_id": str(row["broker_position_id"] or row["trade_id"] or ""),
+                    "symbol": str(row["symbol"] or "").upper(),
+                    "direction": str(row["side"] or "").upper(),
+                    "qty": row["qty"],
+                    "unrealized_pnl": row["realized_pnl"],
+                    "open_time_utc": row["filled_at_utc"] or row["submitted_at_utc"] or row["approved_cycle_ts_utc"],
+                    "received_ts_utc": row["filled_at_utc"] or row["submitted_at_utc"] or row["approved_cycle_ts_utc"],
+                }
+            )
+        return snapshot
+
     def _serialize_incumbent_snapshot(
         self,
         positions: list[dict[str, Any]],
@@ -1121,14 +1763,25 @@ class VanguardOrchestrator:
         return serialized
 
     def _refresh_forward_checkpoints(self, trade_ids: list[str] | None = None) -> None:
+        if self._is_test_execution_mode():
+            return
         try:
             _forward_checkpoints_ensure_table(self.db_path)
             _forward_checkpoints_refresh(self.db_path, trade_ids=trade_ids)
-            _refresh_timeout_policy_data(self.db_path, trade_ids=trade_ids, refresh_shell_replays_flag=True)
+            # Timeout-policy summaries and shell replays are analytics/backfill work.
+            # Skipping them in the live loop keeps pre-cycle maintenance bounded.
+            _refresh_timeout_policy_data(
+                self.db_path,
+                trade_ids=trade_ids,
+                refresh_summary_flag=False,
+                refresh_shell_replays_flag=False,
+            )
         except Exception as exc:
             logger.debug("forward checkpoint refresh skipped: %s", exc)
 
     def _refresh_signal_forward_checkpoints(self, decision_ids: list[str] | None = None) -> None:
+        if self._is_test_execution_mode():
+            return
         try:
             _signal_forward_checkpoints_ensure_table(self.db_path)
             _signal_forward_checkpoints_refresh(self.db_path, decision_ids=decision_ids)
@@ -1152,6 +1805,7 @@ class VanguardOrchestrator:
         fresh_seconds = {
             "forex": int(diag_cfg.get("forex_fresh_seconds") or 180),
             "crypto": int(diag_cfg.get("crypto_fresh_seconds") or 120),
+            "equity": int(diag_cfg.get("equity_fresh_seconds") or 180),
         }
         now_dt = now_utc()
 
@@ -1161,23 +1815,34 @@ class VanguardOrchestrator:
                 profile_id = str(profile.get("id") or "")
                 if not profile_id:
                     continue
+                source_id = str(profile.get("context_source_id") or "")
+                source_cfg = ((runtime_cfg.get("context_sources") or {}).get(source_id) or {})
+                context_source = str(source_cfg.get("source") or "").strip()
                 for asset_class, state_table in (
                     ("forex", "vanguard_forex_pair_state"),
                     ("crypto", "vanguard_crypto_symbol_state"),
+                    ("equity", "vanguard_equity_symbol_state"),
                 ):
                     expected_symbols = self._get_runtime_universe_symbols(profile_id, asset_class)
                     if not expected_symbols:
                         continue
                     placeholders = ",".join("?" for _ in expected_symbols)
                     try:
+                        source_clause = "AND source = ?" if context_source else ""
+                        params = [profile_id, *expected_symbols]
+                        if context_source:
+                            params.append(context_source)
                         quote_rows = con.execute(
                             f"""
-                            SELECT symbol, quote_ts_utc, source_status
+                            SELECT symbol,
+                                   COALESCE(received_ts_utc, quote_ts_utc) AS effective_quote_ts_utc,
+                                   source_status
                             FROM vanguard_context_quote_latest
                             WHERE profile_id = ?
                               AND symbol IN ({placeholders})
+                              {source_clause}
                             """,
-                            [profile_id, *expected_symbols],
+                            params,
                         ).fetchall()
                     except sqlite3.OperationalError as exc:
                         logger.info(
@@ -1197,7 +1862,11 @@ class VanguardOrchestrator:
                         if row is None:
                             missing += 1
                             continue
-                        quote_dt = parse_utc(str(row["quote_ts_utc"])) if row["quote_ts_utc"] else None
+                        quote_dt = (
+                            parse_utc(str(row["effective_quote_ts_utc"]))
+                            if row["effective_quote_ts_utc"]
+                            else None
+                        )
                         age_s = int((now_dt - quote_dt).total_seconds()) if quote_dt else None
                         if age_s is not None:
                             latest_age_s = age_s if latest_age_s is None else min(latest_age_s, age_s)
@@ -1211,27 +1880,37 @@ class VanguardOrchestrator:
                         else:
                             stale += 1
 
-                    state_row = con.execute(
-                        f"""
-                        SELECT
-                            COUNT(*) AS row_count,
-                            SUM(CASE WHEN UPPER(COALESCE(source_status, '')) = 'OK' THEN 1 ELSE 0 END) AS ok_count
-                        FROM {state_table}
-                        WHERE profile_id = ?
-                          AND cycle_ts_utc = ?
-                          AND symbol IN ({placeholders})
-                        """,
-                        [profile_id, cycle_ts, *expected_symbols],
-                    ).fetchone()
-                    latest_state_cycle = con.execute(
-                        f"""
-                        SELECT MAX(cycle_ts_utc) AS latest_cycle
-                        FROM {state_table}
-                        WHERE profile_id = ?
-                          AND symbol IN ({placeholders})
-                        """,
-                        [profile_id, *expected_symbols],
-                    ).fetchone()
+                    try:
+                        state_row = con.execute(
+                            f"""
+                            SELECT
+                                COUNT(*) AS row_count,
+                                SUM(CASE WHEN UPPER(COALESCE(source_status, '')) = 'OK' THEN 1 ELSE 0 END) AS ok_count
+                            FROM {state_table}
+                            WHERE profile_id = ?
+                              AND cycle_ts_utc = ?
+                              AND symbol IN ({placeholders})
+                            """,
+                            [profile_id, cycle_ts, *expected_symbols],
+                        ).fetchone()
+                        latest_state_cycle = con.execute(
+                            f"""
+                            SELECT MAX(cycle_ts_utc) AS latest_cycle
+                            FROM {state_table}
+                            WHERE profile_id = ?
+                              AND symbol IN ({placeholders})
+                            """,
+                            [profile_id, *expected_symbols],
+                        ).fetchone()
+                    except sqlite3.OperationalError as exc:
+                        logger.info(
+                            "[DIAG] skipping state diagnostics for profile=%s asset=%s: %s",
+                            profile_id,
+                            asset_class,
+                            exc,
+                        )
+                        state_row = {"row_count": 0, "ok_count": 0}
+                        latest_state_cycle = {"latest_cycle": None}
                     logger.info(
                         "[DIAG] profile=%s asset=%s expected=%d quotes fresh=%d stale=%d missing=%d latest_quote_age_s=%s state_rows=%d state_ok=%d latest_state_cycle=%s",
                         profile_id,
@@ -1325,6 +2004,1494 @@ class VanguardOrchestrator:
         """True when the run should not persist any DB/session/execution-log writes."""
         return str(self.execution_mode or "manual").lower() == "test"
 
+    @staticmethod
+    def _profile_execution_mode_for_asset(profile: dict[str, Any] | None, asset_class: str | None) -> str:
+        profile = profile or {}
+        asset = str(asset_class or "").lower().strip()
+        lanes = profile.get("asset_lanes") or {}
+        if isinstance(lanes, dict):
+            lane = lanes.get(asset) or {}
+            if isinstance(lane, dict):
+                lane_mode = str(lane.get("execution_mode") or "").lower().strip()
+                if lane_mode == "forward_track_only":
+                    return "manual"
+                if lane_mode in {"auto", "manual", "off", "paper", "test"}:
+                    return lane_mode
+        overrides = profile.get("execution_mode_by_asset_class") or {}
+        if isinstance(overrides, dict):
+            override = str(overrides.get(asset) or "").lower().strip()
+            if override == "forward_track_only":
+                return "manual"
+            if override in {"auto", "manual", "off", "paper", "test"}:
+                return override
+        mode = str(profile.get("execution_mode") or "").lower().strip()
+        if mode == "forward_track_only":
+            return "manual"
+        return mode
+
+    @staticmethod
+    def _profile_lane_for_asset(profile: dict[str, Any] | None, asset_class: str | None) -> dict[str, Any]:
+        profile = profile or {}
+        asset = str(asset_class or "").lower().strip()
+        lanes = profile.get("asset_lanes") or {}
+        if not isinstance(lanes, dict):
+            return {}
+        lane = lanes.get(asset) or {}
+        return lane if isinstance(lane, dict) else {}
+
+    def _lifecycle_policy_id_for_candidate(
+        self,
+        asset_class: str | None,
+        direction: str | None,
+        session_bucket: str | None,
+    ) -> str | None:
+        return resolve_exit_policy_id(
+            {},
+            asset_class,
+            runtime_cfg=self._runtime_config,
+            direction=direction,
+            session_bucket=session_bucket,
+            prefer_lane_binding=False,
+            apply_staged_forex_override=True,
+        )
+
+    def _load_execution_policy_runner_config(self, asset_class: str | None) -> dict[str, Any]:
+        """Resolve the execution-policy-runner binding for this asset class.
+
+        Precedence (new):
+          1. position_manager.execution_policy_runner.by_asset_class[<asset>]
+             — per-asset {live_policy_id, shadow_policy_ids} map. Lets each
+             asset (forex / crypto / metal / equity) carry its own LIVE gate
+             and SHADOW A/B set.
+          2. Legacy flat shape: asset_classes[] + top-level live_policy_id +
+             shadow_policy_ids[]. Back-compat for configs that haven't migrated
+             to by_asset_class yet. Behaves identically to the old code path.
+
+        Shared across both: `policies` map (referenced by id) and
+        `telegram_summary` flag.
+        """
+        asset = str(asset_class or "").lower().strip()
+        pm_cfg = ((self._runtime_config or {}).get("position_manager") or {})
+        runner = pm_cfg.get("execution_policy_runner") or {}
+        if not isinstance(runner, dict) or not bool(runner.get("enabled")):
+            return {"enabled": False}
+        policies = runner.get("policies") or {}
+        if not isinstance(policies, dict):
+            return {"enabled": False}
+
+        # --- Precedence 1: per-asset map --------------------------------
+        by_asset = runner.get("by_asset_class") or {}
+        live_policy_id: str = ""
+        shadow_policy_ids: list[str] = []
+        source: str = "execution_policy_runner.flat"
+        if isinstance(by_asset, dict) and asset and asset in {
+            str(k or "").lower().strip() for k in by_asset.keys()
+        }:
+            entry = next(
+                (v for k, v in by_asset.items() if str(k or "").lower().strip() == asset),
+                None,
+            ) or {}
+            live_policy_id = str(entry.get("live_policy_id") or "").strip()
+            shadow_policy_ids = [
+                str(value or "").strip()
+                for value in (entry.get("shadow_policy_ids") or [])
+                if str(value or "").strip()
+            ]
+            source = f"by_asset_class[{asset}]"
+        else:
+            # --- Precedence 2: legacy flat shape ------------------------
+            allowed_assets = {
+                str(value or "").lower().strip()
+                for value in (runner.get("asset_classes") or [])
+                if str(value or "").strip()
+            }
+            if allowed_assets and asset not in allowed_assets:
+                return {"enabled": False}
+            live_policy_id = str(runner.get("live_policy_id") or "").strip()
+            shadow_policy_ids = [
+                str(value or "").strip()
+                for value in (runner.get("shadow_policy_ids") or [])
+                if str(value or "").strip()
+            ]
+
+        policy_order: list[str] = []
+        if live_policy_id and live_policy_id in policies:
+            policy_order.append(live_policy_id)
+        for policy_id in shadow_policy_ids:
+            if policy_id in policies and policy_id not in policy_order:
+                policy_order.append(policy_id)
+        if not policy_order:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "live_policy_id": live_policy_id,
+            "shadow_policy_ids": shadow_policy_ids,
+            "policy_order": policy_order,
+            "policies": policies,
+            "telegram_summary": bool(runner.get("telegram_summary", True)),
+            "binding_source": source,
+        }
+
+    def _load_tactical_ban_rules(self, asset_class: str | None) -> list[dict[str, str]]:
+        asset = str(asset_class or "").lower().strip()
+        pm_cfg = ((self._runtime_config or {}).get("position_manager") or {})
+        cfg = pm_cfg.get("tactical_bans") or {}
+        if not bool(cfg.get("enabled")):
+            return []
+        rules: list[dict[str, str]] = []
+        for raw_rule in (cfg.get("rules") or []):
+            if not isinstance(raw_rule, dict):
+                continue
+            rule_asset = str(raw_rule.get("asset_class") or "").lower().strip()
+            if rule_asset and asset and rule_asset != asset:
+                continue
+            symbol = str(raw_rule.get("symbol") or "").upper().strip()
+            side = str(raw_rule.get("side") or "").upper().strip()
+            if not symbol or side not in {"LONG", "SHORT"}:
+                continue
+            rules.append(
+                {
+                    "asset_class": rule_asset or asset,
+                    "symbol": symbol,
+                    "side": side,
+                    "reason": str(raw_rule.get("reason") or "tactical_ban").strip() or "tactical_ban",
+                }
+            )
+        return rules
+
+    def _match_tactical_ban(
+        self,
+        *,
+        asset_class: str | None,
+        symbol: str | None,
+        direction: str | None,
+    ) -> dict[str, str] | None:
+        sym = str(symbol or "").upper().strip()
+        side = str(direction or "").upper().strip()
+        for rule in self._load_tactical_ban_rules(asset_class):
+            if rule["symbol"] == sym and rule["side"] == side:
+                return rule
+        return None
+
+    def _load_throughput_control_config(self) -> dict[str, Any]:
+        pm_cfg = ((self._runtime_config or {}).get("position_manager") or {})
+        cfg = pm_cfg.get("throughput_control") or {}
+        if not bool(cfg.get("enabled")):
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "default_max_new_entries_per_cycle": max(int(cfg.get("default_max_new_entries_per_cycle") or 1), 1),
+            "allow_second_entry_if": dict(cfg.get("allow_second_entry_if") or {}),
+        }
+
+    def _load_cost_aware_routing_config(self) -> dict[str, Any]:
+        pm_cfg = ((self._runtime_config or {}).get("position_manager") or {})
+        cfg = pm_cfg.get("cost_aware_routing") or {}
+        if not bool(cfg.get("enabled")):
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "allow_on_missing_metrics": bool(cfg.get("allow_on_missing_metrics", False)),
+            "max_spread_bps": float(cfg.get("max_spread_bps") or 8.0),
+            "min_predicted_move_bps": float(cfg.get("min_predicted_move_bps") or 6.0),
+            "min_after_cost_bps": float(cfg.get("min_after_cost_bps") or 2.0),
+            "min_edge_to_cost_ratio": float(cfg.get("min_edge_to_cost_ratio") or 1.5),
+        }
+
+    def _candidate_cost_routing_state(
+        self,
+        row: dict[str, Any],
+        metrics: dict[str, Any] | None,
+        cfg: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cfg = cfg or self._load_cost_aware_routing_config()
+        metrics = metrics or {}
+        spread_bps_raw = metrics.get("spread_bps")
+        cost_bps_raw = metrics.get("cost_bps")
+        predicted_move_bps_raw = metrics.get("predicted_move_bps")
+        after_cost_bps_raw = metrics.get("after_cost_bps")
+        raw_metrics_json = metrics.get("metrics_json")
+        metrics_payload: dict[str, Any] = {}
+        if isinstance(raw_metrics_json, dict):
+            metrics_payload = raw_metrics_json
+        elif raw_metrics_json not in (None, ""):
+            try:
+                parsed = json.loads(str(raw_metrics_json))
+                if isinstance(parsed, dict):
+                    metrics_payload = parsed
+            except Exception:
+                metrics_payload = {}
+        pip_size = metrics_payload.get("pip_size")
+        live_mid = metrics_payload.get("live_mid")
+        spread_pips = metrics_payload.get("spread_pips")
+        cost_pips = metrics_payload.get("cost_pips")
+        spread_bps = float(spread_bps_raw) if spread_bps_raw not in (None, "") else None
+        cost_bps = float(cost_bps_raw) if cost_bps_raw not in (None, "") else None
+        predicted_move_bps = float(predicted_move_bps_raw) if predicted_move_bps_raw not in (None, "") else None
+        after_cost_bps = float(after_cost_bps_raw) if after_cost_bps_raw not in (None, "") else None
+        if spread_bps is None and spread_pips not in (None, "") and pip_size not in (None, "") and live_mid not in (None, "", 0):
+            try:
+                spread_bps = (float(spread_pips) * float(pip_size) / float(live_mid)) * 10_000.0
+            except Exception:
+                spread_bps = None
+        if cost_bps is None and cost_pips not in (None, "") and pip_size not in (None, "") and live_mid not in (None, "", 0):
+            try:
+                cost_bps = (float(cost_pips) * float(pip_size) / float(live_mid)) * 10_000.0
+            except Exception:
+                cost_bps = None
+        if predicted_move_bps is None:
+            predicted_return = metrics.get("predicted_return", row.get("predicted_return"))
+            if predicted_return not in (None, ""):
+                try:
+                    predicted_move_bps = abs(float(predicted_return)) * 10_000.0
+                except Exception:
+                    predicted_move_bps = None
+        if after_cost_bps is None and predicted_move_bps is not None and cost_bps is not None:
+            after_cost_bps = predicted_move_bps - cost_bps
+        metrics_available = (
+            spread_bps is not None
+            and cost_bps is not None
+            and predicted_move_bps is not None
+            and after_cost_bps is not None
+        )
+        edge_to_cost_ratio = None
+        if predicted_move_bps is not None and cost_bps is not None:
+            if cost_bps > 0:
+                edge_to_cost_ratio = predicted_move_bps / cost_bps
+            else:
+                edge_to_cost_ratio = float("inf")
+        state: dict[str, Any] = {
+            "enabled": bool(cfg.get("enabled")),
+            "metrics_available": metrics_available,
+            "spread_bps": spread_bps,
+            "cost_bps": cost_bps,
+            "predicted_move_bps": predicted_move_bps,
+            "after_cost_bps": after_cost_bps,
+            "edge_to_cost_ratio": edge_to_cost_ratio,
+            "passes": True,
+            "reason_code": "COST_ROUTING_DISABLED" if not cfg.get("enabled") else "OK",
+            "reason_json": {},
+        }
+        if not cfg.get("enabled"):
+            return state
+        if not metrics_available:
+            state["passes"] = bool(cfg.get("allow_on_missing_metrics"))
+            state["reason_code"] = "COST_METRICS_MISSING" if not state["passes"] else "COST_METRICS_BYPASS"
+            state["reason_json"] = {
+                "allow_on_missing_metrics": bool(cfg.get("allow_on_missing_metrics")),
+                "spread_bps": spread_bps,
+                "cost_bps": cost_bps,
+                "predicted_move_bps": predicted_move_bps,
+                "after_cost_bps": after_cost_bps,
+                "metrics_json_present": bool(metrics_payload),
+            }
+            return state
+        if spread_bps is not None and spread_bps > float(cfg.get("max_spread_bps") or 8.0):
+            state["passes"] = False
+            state["reason_code"] = "COST_SPREAD_TOO_WIDE"
+        elif predicted_move_bps is not None and predicted_move_bps < float(cfg.get("min_predicted_move_bps") or 6.0):
+            state["passes"] = False
+            state["reason_code"] = "COST_PREDICTED_MOVE_TOO_SMALL"
+        elif after_cost_bps is not None and after_cost_bps < float(cfg.get("min_after_cost_bps") or 2.0):
+            state["passes"] = False
+            state["reason_code"] = "COST_AFTER_COST_EDGE_TOO_SMALL"
+        elif (
+            edge_to_cost_ratio is not None
+            and edge_to_cost_ratio != float("inf")
+            and edge_to_cost_ratio < float(cfg.get("min_edge_to_cost_ratio") or 1.5)
+        ):
+            state["passes"] = False
+            state["reason_code"] = "COST_EDGE_TO_COST_TOO_LOW"
+        state["reason_json"] = {
+            "spread_bps": spread_bps,
+            "cost_bps": cost_bps,
+            "predicted_move_bps": predicted_move_bps,
+            "after_cost_bps": after_cost_bps,
+            "edge_to_cost_ratio": edge_to_cost_ratio,
+            "score_unit": metrics_payload.get("score_unit"),
+            "max_spread_bps": float(cfg.get("max_spread_bps") or 8.0),
+            "min_predicted_move_bps": float(cfg.get("min_predicted_move_bps") or 6.0),
+            "min_after_cost_bps": float(cfg.get("min_after_cost_bps") or 2.0),
+            "min_edge_to_cost_ratio": float(cfg.get("min_edge_to_cost_ratio") or 1.5),
+        }
+        return state
+
+    def _candidate_priority_sort_key(
+        self,
+        row: dict[str, Any],
+        metrics: dict[str, Any] | None,
+    ) -> tuple[Any, ...]:
+        metrics = metrics or {}
+        cost_cfg = self._load_cost_aware_routing_config()
+        cost_state = self._candidate_cost_routing_state(row, metrics, cost_cfg)
+        direction = str(row.get("direction") or "").upper()
+        conviction = metrics.get("conviction", row.get("conviction"))
+        strength = self._directional_conviction_strength(direction, conviction)
+        top_rank_streak = int(metrics.get("top_rank_streak") or 0)
+        selection_rank = int(metrics.get("selection_rank") or row.get("rank") or 999999)
+        flip_count_window = int(metrics.get("flip_count_window") or 999999)
+        edge_score = float(row.get("edge_score") or 0.0)
+        predicted_return = abs(float(metrics.get("predicted_return") or row.get("predicted_return") or 0.0))
+        symbol = str(row.get("symbol") or "").upper()
+        edge_to_cost_ratio = cost_state.get("edge_to_cost_ratio")
+        after_cost_bps = cost_state.get("after_cost_bps")
+        return (
+            -(float(edge_to_cost_ratio) if edge_to_cost_ratio not in (None, float("inf")) else 999999.0 if edge_to_cost_ratio == float("inf") else -1.0),
+            -(float(after_cost_bps) if after_cost_bps is not None else -999999.0),
+            -(float(strength) if strength is not None else -1.0),
+            -top_rank_streak,
+            selection_rank,
+            flip_count_window,
+            -edge_score,
+            -predicted_return,
+            symbol,
+        )
+
+    def _candidate_allows_second_entry(
+        self,
+        row: dict[str, Any],
+        metrics: dict[str, Any] | None,
+        cfg: dict[str, Any] | None,
+    ) -> bool:
+        cfg = cfg or {}
+        allow_cfg = dict(cfg.get("allow_second_entry_if") or {})
+        min_strength = float(allow_cfg.get("min_directional_conviction") or 0.82)
+        min_top_rank = int(allow_cfg.get("min_top_rank_streak") or 2)
+        metrics = metrics or {}
+        strength = self._directional_conviction_strength(
+            str(row.get("direction") or "").upper(),
+            metrics.get("conviction", row.get("conviction")),
+        )
+        top_rank_streak = int(metrics.get("top_rank_streak") or 0)
+        return strength is not None and strength >= min_strength and top_rank_streak >= min_top_rank
+
+    def _tactical_bans_summary(self, asset_class: str | None) -> str:
+        rules = self._load_tactical_ban_rules(asset_class)
+        if not rules:
+            return "none"
+        return ", ".join(f"{rule['symbol']} {rule['side']}" for rule in rules)
+
+    def _throughput_mode_summary(self) -> str:
+        cfg = self._load_throughput_control_config()
+        if not cfg.get("enabled"):
+            return "unlimited"
+        default_max = int(cfg.get("default_max_new_entries_per_cycle") or 1)
+        allow_cfg = dict(cfg.get("allow_second_entry_if") or {})
+        min_strength = float(allow_cfg.get("min_directional_conviction") or 0.82)
+        min_top_rank = int(allow_cfg.get("min_top_rank_streak") or 2)
+        return (
+            f"top{default_max}"
+            f"+top2_if_strong(conv>={min_strength:.2f},top_rank>={min_top_rank})"
+        )
+
+    def _cost_aware_routing_summary(self) -> str:
+        cfg = self._load_cost_aware_routing_config()
+        if not cfg.get("enabled"):
+            return "off"
+        return (
+            "on "
+            f"allow_missing={'yes' if cfg.get('allow_on_missing_metrics') else 'no'} "
+            f"max_spread={float(cfg.get('max_spread_bps') or 0.0):.1f}bp "
+            f"min_move={float(cfg.get('min_predicted_move_bps') or 0.0):.1f}bp "
+            f"min_after_cost={float(cfg.get('min_after_cost_bps') or 0.0):.1f}bp "
+            f"min_ratio={float(cfg.get('min_edge_to_cost_ratio') or 0.0):.2f}x"
+        )
+
+    def _live_policy_recent_audit(
+        self,
+        *,
+        profile_id: str,
+        asset_class: str = "forex",
+        hours: int = 24,
+    ) -> dict[str, Any]:
+        runner_cfg = self._load_execution_policy_runner_config(asset_class)
+        live_policy_id = str(runner_cfg.get("live_policy_id") or "").strip()
+        if not live_policy_id:
+            return {"live_policy_id": None, "decision_counts": {}, "reason_counts": {}}
+        try:
+            with sqlite_conn(self.db_path) as con:
+                con.row_factory = sqlite3.Row
+                decision_rows = con.execute(
+                    """
+                    SELECT execution_decision, COUNT(*) AS n
+                    FROM vanguard_signal_decision_log
+                    WHERE profile_id = ?
+                      AND asset_class = ?
+                      AND execution_policy_mode = 'live'
+                      AND execution_policy_id = ?
+                      AND created_at_utc >= strftime('%Y-%m-%dT%H:%M:%SZ','now', ?)
+                    GROUP BY execution_decision
+                    ORDER BY n DESC, execution_decision ASC
+                    """,
+                    (profile_id, asset_class, live_policy_id, f"-{int(hours)} hours"),
+                ).fetchall()
+                reason_rows = con.execute(
+                    """
+                    SELECT decision_reason_code, COUNT(*) AS n
+                    FROM vanguard_signal_decision_log
+                    WHERE profile_id = ?
+                      AND asset_class = ?
+                      AND execution_policy_mode = 'live'
+                      AND execution_policy_id = ?
+                      AND created_at_utc >= strftime('%Y-%m-%dT%H:%M:%SZ','now', ?)
+                    GROUP BY decision_reason_code
+                    ORDER BY n DESC, decision_reason_code ASC
+                    LIMIT 6
+                    """,
+                    (profile_id, asset_class, live_policy_id, f"-{int(hours)} hours"),
+                ).fetchall()
+            return {
+                "live_policy_id": live_policy_id,
+                "decision_counts": {
+                    str(r["execution_decision"]): int(r["n"] or 0) for r in decision_rows
+                },
+                "reason_counts": {
+                    str(r["decision_reason_code"] or ""): int(r["n"] or 0) for r in reason_rows
+                },
+            }
+        except sqlite3.Error:
+            return {"live_policy_id": live_policy_id, "decision_counts": {}, "reason_counts": {}}
+
+    def _build_live_policy_contract_telegram(self, *, asset_class: str = "forex") -> str:
+        pm_cfg = ((self._runtime_config or {}).get("position_manager") or {})
+        runner_cfg = self._load_execution_policy_runner_config(asset_class)
+        policies = dict(pm_cfg.get("policies") or {})
+        shadow_ids = [str(v) for v in (runner_cfg.get("shadow_policy_ids") or []) if str(v)]
+        shadow_bits = []
+        for policy_id in shadow_ids:
+            spec = dict(((runner_cfg.get("policies") or {}).get(policy_id) or {}))
+            kind = str(spec.get("kind") or "?")
+            shadow_bits.append(f"{policy_id}({kind})")
+        active_bindings = self._active_telegram_bindings(asset_class)
+        if active_bindings:
+            policy_to_profiles: dict[str, list[str]] = {}
+            for profile_id, binding in active_bindings:
+                policy_id = str(binding.get("execution_policy_id") or runner_cfg.get("live_policy_id") or "").strip()
+                if not policy_id:
+                    policy_id = "-"
+                policy_to_profiles.setdefault(policy_id, []).append(profile_id)
+        else:
+            fallback_policy = str(runner_cfg.get("live_policy_id") or "").strip() or "-"
+            fallback_profile = str(self._accounts[0].get("id") or "ftmo_demo_100k") if self._accounts else "ftmo_demo_100k"
+            policy_to_profiles = {fallback_policy: [fallback_profile]}
+
+        policy_lines: list[str] = []
+        for policy_id, profile_ids in policy_to_profiles.items():
+            live_policy = dict(((runner_cfg.get("policies") or {}).get(policy_id) or {}))
+            lifecycle_policy = dict((policies.get(policy_id) or {}))
+            decision_counts: dict[str, int] = {}
+            reason_counts: dict[str, int] = {}
+            for profile_id in profile_ids:
+                audit = self._live_policy_recent_audit(
+                    profile_id=profile_id,
+                    asset_class=asset_class,
+                    hours=24,
+                )
+                for key, value in (audit.get("decision_counts") or {}).items():
+                    decision_counts[str(key)] = int(decision_counts.get(str(key), 0)) + int(value or 0)
+                for key, value in (audit.get("reason_counts") or {}).items():
+                    reason_counts[str(key)] = int(reason_counts.get(str(key), 0)) + int(value or 0)
+
+            decision_summary = " ".join(f"{k}={v}" for k, v in sorted(decision_counts.items())) or "-"
+            reason_summary = " ".join(f"{k}={v}" for k, v in sorted(reason_counts.items())) or "-"
+            gate_bits = [
+                f"min_conviction={live_policy.get('min_conviction')}",
+                f"min_top_rank={live_policy.get('min_top_rank_streak')}",
+            ]
+            if live_policy.get("max_global_cycle_rank_abs_pred") is not None:
+                gate_bits.append(f"max_cycle_rank_abs_pred={live_policy.get('max_global_cycle_rank_abs_pred')}")
+            if live_policy.get("min_abs_predicted_return") is not None:
+                gate_bits.append(f"min_abs_pred={live_policy.get('min_abs_predicted_return')}")
+            gate_bits.extend(
+                [
+                    f"max_flip={live_policy.get('max_flip_count_window')}",
+                    f"session={live_policy.get('session_bucket') or 'all'}",
+                    f"direction={live_policy.get('direction') or 'SYM'}",
+                    f"checkpoint={live_policy.get('checkpoint_minutes') or 'default'}",
+                ]
+            )
+            exit_summary = (
+                f"bar={int(lifecycle_policy.get('bar_interval_minutes') or 5)}m "
+                f"loss_review={int(lifecycle_policy.get('loss_review_interval_minutes') or 0)}m "
+                f"close_below=${lifecycle_policy.get('close_below_pnl_dollars')} "
+                f"hard_close={int(lifecycle_policy.get('hard_close_bars') or 0) * int(lifecycle_policy.get('bar_interval_minutes') or 5)}m "
+                f"cooldown={int(lifecycle_policy.get('action_cooldown_seconds') or 0)}s "
+                f"retries={int(lifecycle_policy.get('max_retry_count_per_action') or 0)}"
+            )
+            profile_names = ", ".join(self._profile_display_label(profile_id) for profile_id in profile_ids)
+            policy_lines.extend(
+                [
+                    f"live={policy_id} profiles={profile_names}",
+                    f"kind={live_policy.get('kind') or '-'}",
+                    f"gate: {' '.join(gate_bits)}",
+                    f"exit: {exit_summary}",
+                    f"24h live decisions: {decision_summary}",
+                    f"24h top reasons: {reason_summary}",
+                    "",
+                ]
+            )
+        return (
+            f"📐 <b>[{self._telegram_env_label()}] LIVE POLICY CONTRACT</b>\n"
+            f"asset={str(asset_class).upper()} binding={runner_cfg.get('binding_source') or '-'}\n"
+            f"shadows: {', '.join(shadow_bits) if shadow_bits else 'none'}\n"
+            f"bans: {self._tactical_bans_summary(asset_class)}\n"
+            f"throughput: {self._throughput_mode_summary()}\n"
+            f"cost_aware: {self._cost_aware_routing_summary()}\n"
+            f"timeout_auto_close={'on' if bool((pm_cfg.get('timeout_auto_close') or {}).get('enabled')) else 'off'} "
+            f"skip_legacy={'yes' if bool((pm_cfg.get('timeout_auto_close') or {}).get('skip_legacy_exit_rules')) else 'no'}\n"
+            f"{chr(10).join(policy_lines).rstrip()}"
+        )
+
+    def _evaluate_execution_policy(
+        self,
+        policy_id: str,
+        policy_spec: dict[str, Any] | None,
+        *,
+        row: dict[str, Any],
+        asset_class: str | None,
+        direction: str | None,
+        session_bucket: str | None,
+        candidate_metrics: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        spec = policy_spec or {}
+        kind = str(spec.get("kind") or "").strip().lower()
+        metrics = candidate_metrics or {}
+        asset = str(asset_class or "").lower().strip()
+        side = str(direction or "").upper().strip()
+        session = str(session_bucket or "").lower().strip()
+        conviction_raw = row.get("conviction")
+        if conviction_raw is None:
+            conviction_raw = metrics.get("conviction")
+        conviction = float(conviction_raw) if conviction_raw not in (None, "") else None
+        top_rank_streak = int(metrics.get("top_rank_streak") or 0)
+        flip_count_window = int(metrics.get("flip_count_window") or 0)
+        global_cycle_rank_abs_pred = (
+            int(metrics.get("global_cycle_rank_abs_pred"))
+            if metrics.get("global_cycle_rank_abs_pred") not in (None, "")
+            else None
+        )
+        predicted_return_raw = metrics.get("predicted_return", row.get("predicted_return"))
+        predicted_return = (
+            float(predicted_return_raw) if predicted_return_raw not in (None, "") else None
+        )
+        abs_predicted_return = abs(predicted_return) if predicted_return is not None else None
+        target_horizon_bars = int(row.get("target_horizon_bars") or metrics.get("target_horizon_bars") or 0)
+        reason_json = {
+            "policy_kind": kind,
+            "conviction": conviction,
+            "top_rank_streak": top_rank_streak,
+            "flip_count_window": flip_count_window,
+            "global_cycle_rank_abs_pred": global_cycle_rank_abs_pred,
+            "predicted_return": predicted_return,
+            "abs_predicted_return": abs_predicted_return,
+            "target_horizon_bars": target_horizon_bars,
+            "session_bucket": session or None,
+            "direction": side or None,
+        }
+        if str(spec.get("asset_class") or "").lower().strip() not in {"", asset}:
+            return {
+                "approved": False,
+                "reason_code": "POLICY_ASSET_MISMATCH",
+                "reason_json": {**reason_json, "required_asset_class": spec.get("asset_class")},
+            }
+        if kind == "baseline":
+            return {
+                "approved": True,
+                "reason_code": "POLICY_BASELINE_APPROVED",
+                "reason_json": {**reason_json, "gate_policy": str(row.get("gate_policy") or "") or None},
+            }
+        if kind == "conviction_top_rank":
+            min_conviction = float(spec.get("min_conviction") or 0.0)
+            min_top_rank = int(spec.get("min_top_rank_streak") or 1)
+            approved = conviction is not None and conviction >= min_conviction and top_rank_streak >= min_top_rank
+            return {
+                "approved": approved,
+                "reason_code": "POLICY_APPROVED" if approved else "POLICY_FILTER_NOT_MET",
+                "reason_json": {
+                    **reason_json,
+                    "min_conviction": min_conviction,
+                    "min_top_rank_streak": min_top_rank,
+                },
+            }
+        if kind == "conviction_top_rank_directional":
+            # Direction-aware mirror of conviction_top_rank: admits strong SHORT
+            # conviction (conviction <= 1 - min_conviction) alongside strong LONG
+            # (conviction >= min_conviction). Observational use recommended until
+            # SHORT-side sample is validated independently of LONG.
+            min_conviction = float(spec.get("min_conviction") or 0.0)
+            min_top_rank = int(spec.get("min_top_rank_streak") or 1)
+            directional_conviction = (
+                max(conviction, 1.0 - conviction) if conviction is not None else None
+            )
+            approved = (
+                directional_conviction is not None
+                and directional_conviction >= min_conviction
+                and top_rank_streak >= min_top_rank
+            )
+            min_abs_predicted_return = (
+                float(spec.get("min_abs_predicted_return"))
+                if spec.get("min_abs_predicted_return") not in (None, "")
+                else None
+            )
+            max_global_cycle_rank_abs_pred = (
+                int(spec.get("max_global_cycle_rank_abs_pred"))
+                if spec.get("max_global_cycle_rank_abs_pred") not in (None, "")
+                else None
+            )
+            if min_abs_predicted_return is not None:
+                approved = approved and abs_predicted_return is not None and abs_predicted_return >= min_abs_predicted_return
+            if max_global_cycle_rank_abs_pred is not None:
+                approved = (
+                    approved
+                    and global_cycle_rank_abs_pred is not None
+                    and global_cycle_rank_abs_pred <= max_global_cycle_rank_abs_pred
+                )
+            return {
+                "approved": approved,
+                "reason_code": "POLICY_APPROVED" if approved else "POLICY_FILTER_NOT_MET",
+                "reason_json": {
+                    **reason_json,
+                    "min_conviction": min_conviction,
+                    "min_top_rank_streak": min_top_rank,
+                    "directional_conviction": directional_conviction,
+                    "min_abs_predicted_return": min_abs_predicted_return,
+                    "max_global_cycle_rank_abs_pred": max_global_cycle_rank_abs_pred,
+                    "conviction_direction": (
+                        "LONG" if (conviction is not None and conviction >= 0.5)
+                        else "SHORT" if conviction is not None
+                        else None
+                    ),
+                    "gate_shape": "MAX(c, 1-c) >= min_conviction",
+                },
+            }
+        if kind == "conviction_short_top_rank":
+            min_conviction = float(spec.get("min_conviction") or 0.0)
+            max_short_conviction = 1.0 - min_conviction
+            min_top_rank = int(spec.get("min_top_rank_streak") or 1)
+            approved = (
+                conviction is not None
+                and conviction <= max_short_conviction
+                and top_rank_streak >= min_top_rank
+            )
+            return {
+                "approved": approved,
+                "reason_code": "POLICY_APPROVED" if approved else "POLICY_FILTER_NOT_MET",
+                "reason_json": {
+                    **reason_json,
+                    "min_conviction": min_conviction,
+                    "max_short_conviction": max_short_conviction,
+                    "min_top_rank_streak": min_top_rank,
+                    "gate_shape": "conviction <= 1 - min_conviction",
+                },
+            }
+        if kind == "conviction_flip":
+            min_conviction = float(spec.get("min_conviction") or 0.0)
+            max_flip = int(spec.get("max_flip_count_window") or 0)
+            approved = conviction is not None and conviction >= min_conviction and flip_count_window <= max_flip
+            return {
+                "approved": approved,
+                "reason_code": "POLICY_APPROVED" if approved else "POLICY_FILTER_NOT_MET",
+                "reason_json": {
+                    **reason_json,
+                    "min_conviction": min_conviction,
+                    "max_flip_count_window": max_flip,
+                },
+            }
+        if kind == "asian_long_240":
+            required_session = str(spec.get("session_bucket") or "asian").lower().strip()
+            required_direction = str(spec.get("direction") or "LONG").upper().strip()
+            checkpoint_minutes = int(spec.get("checkpoint_minutes") or 240)
+            approved = session == required_session and side == required_direction
+            return {
+                "approved": approved,
+                "reason_code": "POLICY_APPROVED" if approved else "POLICY_FILTER_NOT_MET",
+                "reason_json": {
+                    **reason_json,
+                    "required_session_bucket": required_session,
+                    "required_direction": required_direction,
+                    "checkpoint_minutes": checkpoint_minutes,
+                },
+            }
+        if kind == "pocket_matrix_long_only_v1":
+            # Slot-4-only pocket-matrix policy. LONG-only, family-aware (USD/JPY_X/CROSS),
+            # conviction-banded, session-restricted. Rejection emits precise reason codes.
+            sym = str(row.get("symbol") or metrics.get("symbol") or "").upper()
+            if sym.endswith("JPY"):
+                family = "JPY_X"
+            elif sym.startswith("USD") or sym.endswith("USD"):
+                family = "USD"
+            elif sym:
+                family = "CROSS"
+            else:
+                family = None
+
+            allowed_pockets = spec.get("allowed_pockets") or []
+
+            # Hard rejects in precedence order.
+            if side != "LONG":
+                return {
+                    "approved": False,
+                    "reason_code": "POLICY_SHORT_NOT_ALLOWED",
+                    "reason_json": {
+                        **reason_json,
+                        "policy_id": policy_id,
+                        "family": family,
+                        "symbol": sym,
+                    },
+                }
+            allowed_sessions = {
+                str(s).lower().strip()
+                for pocket in allowed_pockets
+                for s in (
+                    [pocket.get("session")] if isinstance(pocket.get("session"), str)
+                    else (pocket.get("session") or [])
+                )
+            } or {"asian", "overlap"}
+            if session not in allowed_sessions:
+                return {
+                    "approved": False,
+                    "reason_code": "POLICY_SESSION_NOT_ALLOWED",
+                    "reason_json": {
+                        **reason_json,
+                        "policy_id": policy_id,
+                        "family": family,
+                        "symbol": sym,
+                        "allowed_sessions": sorted(allowed_sessions),
+                    },
+                }
+            if family is None:
+                return {
+                    "approved": False,
+                    "reason_code": "POLICY_FAMILY_CLASSIFICATION_MISSING",
+                    "reason_json": {
+                        **reason_json,
+                        "policy_id": policy_id,
+                        "symbol": sym,
+                    },
+                }
+
+            # Match against allowed pockets. A pocket matches if family+session+direction
+            # match AND conviction is in [min_conv, max_conv).
+            family_session_match = False
+            for pocket in allowed_pockets:
+                p_family = str(pocket.get("family") or "").upper().strip()
+                p_dir = str(pocket.get("direction") or "LONG").upper().strip()
+                p_sessions = pocket.get("session")
+                if isinstance(p_sessions, str):
+                    p_session_set = {p_sessions.lower().strip()}
+                else:
+                    p_session_set = {str(s).lower().strip() for s in (p_sessions or [])}
+                if p_family != family:
+                    continue
+                if p_dir != side:
+                    continue
+                if session not in p_session_set:
+                    continue
+                family_session_match = True
+                p_min_conv = float(pocket.get("min_conv", 0.0) or 0.0)
+                p_max_conv = pocket.get("max_conv")
+                p_max_conv = float(p_max_conv) if p_max_conv not in (None, "") else 1.0
+                if conviction is None:
+                    continue
+                # Inclusive on min, exclusive on max — except when max == 1.0 (catch top tail).
+                if conviction >= p_min_conv and (
+                    conviction < p_max_conv or (p_max_conv >= 1.0 and conviction <= 1.0)
+                ):
+                    return {
+                        "approved": True,
+                        "reason_code": "POLICY_APPROVED",
+                        "reason_json": {
+                            **reason_json,
+                            "policy_id": policy_id,
+                            "matched_pocket": {
+                                "family": p_family,
+                                "session": session,
+                                "direction": p_dir,
+                                "min_conv": p_min_conv,
+                                "max_conv": p_max_conv,
+                            },
+                            "symbol": sym,
+                            "family": family,
+                        },
+                    }
+
+            # No conviction-band match: distinguish "no family/session match" from
+            # "family/session matched but conviction outside all allowed bands".
+            if family_session_match:
+                return {
+                    "approved": False,
+                    "reason_code": "POLICY_CONVICTION_BUCKET_NOT_ALLOWED",
+                    "reason_json": {
+                        **reason_json,
+                        "policy_id": policy_id,
+                        "family": family,
+                        "symbol": sym,
+                        "conviction_observed": conviction,
+                    },
+                }
+            return {
+                "approved": False,
+                "reason_code": "POLICY_POCKET_NOT_ALLOWED",
+                "reason_json": {
+                    **reason_json,
+                    "policy_id": policy_id,
+                    "family": family,
+                    "symbol": sym,
+                },
+            }
+        return {
+            "approved": False,
+            "reason_code": "POLICY_UNKNOWN",
+            "reason_json": {**reason_json, "policy_id": policy_id},
+        }
+
+    def _build_execution_policy_summary_telegram(
+        self,
+        cycle_ts: str,
+        summary: dict[str, Any] | None,
+    ) -> str | None:
+        if not summary:
+            return None
+        lines = [
+            f"🧪 <b>[{self._telegram_env_label()}] EXECUTION POLICIES</b> — {html.escape(str(cycle_ts or '')[:16])}",
+            f"mode={html.escape(str(self.execution_mode or '').upper())}",
+        ]
+        live = summary.get("live") or {}
+        live_policy_id = str(live.get("policy_id") or "").strip()
+        if live_policy_id:
+            lines.append(
+                "LIVE "
+                f"{html.escape(live_policy_id)}: approved={int(live.get('approved') or 0)} "
+                f"executed={int(live.get('executed') or 0)} "
+                f"filled={int(live.get('filled') or 0)} "
+                f"failed={int(live.get('failed') or 0)} "
+                f"forward={int(live.get('forward_tracked') or 0)} "
+                f"rejected={int(live.get('rejected') or 0)}"
+            )
+        shadow = summary.get("shadow") or {}
+        if shadow:
+            lines.append("")
+            lines.append("SHADOW")
+            for policy_id, counts in shadow.items():
+                lines.append(
+                    f"{html.escape(str(policy_id))}: approved={int((counts or {}).get('approved') or 0)} "
+                    f"rejected={int((counts or {}).get('rejected') or 0)}"
+                )
+        return "\n".join(lines)
+
+    def _build_live_trade_shortlist_telegram(
+        self,
+        cycle_ts: str,
+        summary: dict[str, Any] | None = None,
+    ) -> str | None:
+        visible_assets = [str(asset or "").lower() for asset in self._telegram_visible_asset_classes()]
+        asset_class = "forex" if "forex" in visible_assets else str((visible_assets[0] if visible_assets else "forex") or "forex").lower()
+        active_profile_ids = self._active_telegram_profile_ids(asset_class)
+        if not active_profile_ids:
+            active_profile_ids = [
+                str(account.get("id") or "")
+                for account in (self._accounts or [])
+                if str(account.get("id") or "").strip()
+            ]
+        if not active_profile_ids:
+            return None
+
+        active_bindings = self._active_telegram_bindings(asset_class)
+        runner_cfg = self._load_execution_policy_runner_config(asset_class)
+        policy_to_profile_ids: dict[str, list[str]] = defaultdict(list)
+        for profile_id, binding in active_bindings:
+            policy_id = str(binding.get("execution_policy_id") or "").strip()
+            if not policy_id:
+                continue
+            policy_to_profile_ids[policy_id].append(str(profile_id or "").strip())
+        if not policy_to_profile_ids:
+            summary_policy_id = str(((summary or {}).get("live") or {}).get("policy_id") or runner_cfg.get("live_policy_id") or "").strip()
+            if summary_policy_id:
+                policy_to_profile_ids[summary_policy_id] = list(active_profile_ids)
+        if not policy_to_profile_ids:
+            return None
+        cycle_audit_rows: list[dict[str, Any]] = []
+
+        placeholders = ",".join("?" for _ in active_profile_ids) or "''"
+        try:
+            with sqlite_conn(self.db_path) as con:
+                con.row_factory = sqlite3.Row
+                live_policy_rows = [
+                    dict(row)
+                    for row in con.execute(
+                        f"""
+                        SELECT profile_id,
+                               symbol,
+                               direction,
+                               execution_policy_id,
+                               execution_decision,
+                               decision_reason_code,
+                               selection_rank,
+                               entry_price,
+                               lot_size,
+                               edge_score,
+                               predicted_return,
+                               decision_reason_json
+                        FROM vanguard_signal_decision_log
+                        WHERE cycle_ts_utc = ?
+                          AND profile_id IN ({placeholders})
+                          AND execution_policy_mode = 'live'
+                        ORDER BY selection_rank IS NULL, selection_rank, symbol
+                        """,
+                        [cycle_ts, *active_profile_ids],
+                    )
+                ]
+                pre_live_rows = [
+                    dict(row)
+                    for row in con.execute(
+                        f"""
+                        SELECT profile_id,
+                               symbol,
+                               direction,
+                               execution_decision,
+                               decision_reason_code,
+                               selection_rank,
+                               entry_price,
+                               lot_size,
+                               edge_score,
+                               predicted_return,
+                               decision_reason_json
+                        FROM vanguard_signal_decision_log
+                        WHERE cycle_ts_utc = ?
+                          AND profile_id IN ({placeholders})
+                          AND execution_policy_mode IS NULL
+                          AND execution_decision IN ('SKIPPED_SELECTION_CAP', 'BRIDGE_FORWARD_TRACKED', 'EXECUTION_FAILED')
+                        ORDER BY predicted_return DESC, symbol
+                        """,
+                        [cycle_ts, *active_profile_ids],
+                    )
+                ]
+                v5_rank_lookup: dict[tuple[str, str, str, str], int | None] = {}
+                try:
+                    for row in con.execute(
+                        f"""
+                        SELECT cycle_ts_utc,
+                               profile_id,
+                               symbol,
+                               direction,
+                               global_cycle_rank_abs_pred,
+                               top_rank_streak,
+                               metrics_json
+                        FROM vanguard_v5_selection
+                        WHERE cycle_ts_utc = ?
+                          AND profile_id IN ({placeholders})
+                          AND asset_class = ?
+                        """,
+                        [cycle_ts, *active_profile_ids, asset_class],
+                    ):
+                        v5_rank_lookup[
+                            (
+                                str(row["cycle_ts_utc"] or ""),
+                                str(row["profile_id"] or ""),
+                                str(row["symbol"] or "").upper(),
+                                str(row["direction"] or "").upper(),
+                            )
+                        ] = {
+                            "global_cycle_rank_abs_pred": (
+                                None if row["global_cycle_rank_abs_pred"] is None else int(row["global_cycle_rank_abs_pred"])
+                            ),
+                            "top_rank_streak": int(row["top_rank_streak"] or 0),
+                            **(
+                                json.loads(row["metrics_json"] or "{}")
+                                if row["metrics_json"] not in (None, "")
+                                else {}
+                            ),
+                        }
+                except Exception:
+                    v5_rank_lookup = {}
+                try:
+                    cycle_audit_rows = [
+                        dict(row)
+                        for row in con.execute(
+                            f"""
+                            SELECT profile_id,
+                                   execution_policy_id,
+                                   tradeability_rows,
+                                   tradeability_pass_rows,
+                                   live_policy_filtered_rows,
+                                   route_candidate_rows,
+                                   selected_rows,
+                                   portfolio_approved_rows,
+                                   decision_rows,
+                                   selection_reasons_json,
+                                   live_policy_failed_checks_json
+                            FROM vanguard_cycle_audit
+                            WHERE cycle_ts_utc = ?
+                              AND profile_id IN ({placeholders})
+                              AND asset_class = ?
+                            """,
+                            [cycle_ts, *active_profile_ids, asset_class],
+                        )
+                    ]
+                except Exception:
+                    cycle_audit_rows = []
+        except Exception as exc:
+            logger.warning("Could not build live trade shortlist Telegram: %s", exc)
+            return None
+
+        live_rows = [row for row in live_policy_rows if str(row.get("execution_decision") or "").upper() == "EXECUTED"]
+        for row in pre_live_rows:
+            key = (
+                cycle_ts,
+                str(row.get("profile_id") or ""),
+                str(row.get("symbol") or "").upper(),
+                str(row.get("direction") or "").upper(),
+            )
+        display_n = int(((self._runtime_config or {}).get("runtime") or {}).get("shortlist_display_top_n") or 10)
+
+        def _bucket(row: dict[str, Any]) -> str:
+            reason = str(row.get("decision_reason_code") or "").upper()
+            decision = str(row.get("execution_decision") or "").upper()
+            if decision == "EXECUTED":
+                return "TAKEN_LIVE"
+            if reason == "TACTICAL_BAN":
+                return "BANNED"
+            if reason in {
+                "BRIDGE_FORWARD_TRACKED",
+                "SCHEDULED_FLATTEN_WINDOW",
+                "LIVE_ASSET_DISABLED",
+                "ZERO_SIZING",
+                "PROFILE_SELECTION_CAP",
+                "PROFILE_DIRECTION_SELECTION_CAP",
+                "ASSET_CLASS_SELECTION_CAP",
+                "BASE_CURRENCY_SELECTION_CAP",
+                "SKIPPED_DUPLICATE_SYMBOL_OPEN",
+                "DUPLICATE_SYMBOL_OPEN",
+                "THROUGHPUT_LIMIT",
+            }:
+                return "ACTIONABLE_NOT_ROUTED"
+            if decision == "EXECUTION_FAILED":
+                return "FAILED"
+            return decision or "OTHER"
+
+        def _fmt_price(value: Any) -> str:
+            try:
+                val = float(value)
+            except Exception:
+                return "-"
+            if val >= 100:
+                return f"{val:.3f}"
+            return f"{val:.5f}"
+
+        def _fmt_pred(row: dict[str, Any]) -> str:
+            pred = row.get("predicted_return")
+            try:
+                return f"{float(pred):+.4f}"
+            except Exception:
+                return "-"
+
+        def _pre_live_block_label(row: dict[str, Any]) -> str:
+            reason = str(row.get("decision_reason_code") or row.get("execution_decision") or "").upper()
+            labels = {
+                "PROFILE_DIRECTION_SELECTION_CAP": "BLOCKED: direction cap already full",
+                "PROFILE_SELECTION_CAP": "BLOCKED: profile cap already full",
+                "ASSET_CLASS_SELECTION_CAP": "BLOCKED: asset-class cap already full",
+                "BASE_CURRENCY_SELECTION_CAP": "BLOCKED: base-currency cap already full",
+                "BLOCKED_ACCOUNT_HEADROOM": "BLOCKED: account headroom too low",
+                "SKIPPED_DUPLICATE_SYMBOL_OPEN": "BLOCKED: symbol already open",
+                "DUPLICATE_SYMBOL_OPEN": "BLOCKED: symbol already open",
+                "BRIDGE_FORWARD_TRACKED": "BLOCKED: forward-tracked only",
+                "EXECUTION_FAILED": "BLOCKED: execution failed",
+            }
+            return labels.get(reason, f"BLOCKED: {reason.lower().replace('_', ' ')}")
+
+        def _is_manual_candidate(row: dict[str, Any]) -> bool:
+            reason = str(row.get("decision_reason_code") or row.get("execution_decision") or "").upper()
+            if reason not in {
+                "PROFILE_DIRECTION_SELECTION_CAP",
+                "PROFILE_SELECTION_CAP",
+                "ASSET_CLASS_SELECTION_CAP",
+                "BASE_CURRENCY_SELECTION_CAP",
+                "BLOCKED_ACCOUNT_HEADROOM",
+            }:
+                return False
+            try:
+                pred = abs(float(row.get("predicted_return")))
+            except Exception:
+                return False
+            global_rank = row.get("global_cycle_rank_abs_pred")
+            try:
+                rank_ok = True if max_global_rank is None else (
+                    global_rank is not None and int(global_rank) <= int(max_global_rank)
+                )
+            except Exception:
+                rank_ok = False
+            try:
+                mag_ok = True if min_abs_pred is None else pred >= float(min_abs_pred)
+            except Exception:
+                mag_ok = False
+            return bool(rank_ok and mag_ok)
+
+        def _pre_live_manual_gate_bits(row: dict[str, Any]) -> str:
+            bits: list[str] = []
+            global_rank = row.get("global_cycle_rank_abs_pred")
+            try:
+                pred = abs(float(row.get("predicted_return")))
+            except Exception:
+                pred = None
+            try:
+                if global_rank is not None and max_global_rank is not None:
+                    if int(global_rank) > int(max_global_rank):
+                        bits.append(f"rank {int(global_rank)} > {int(max_global_rank)}")
+            except Exception:
+                pass
+            try:
+                if pred is not None and min_abs_pred is not None and pred < float(min_abs_pred):
+                    bits.append(f"|pred| {pred:.4f} < {float(min_abs_pred):.2f}")
+            except Exception:
+                pass
+            return "  ".join(bits)
+
+        def _live_policy_block_label(row: dict[str, Any]) -> str:
+            payload = {}
+            try:
+                payload = json.loads(row.get("decision_reason_json") or "{}")
+            except Exception:
+                payload = {}
+
+            global_rank = payload.get("global_cycle_rank_abs_pred")
+            max_rank = payload.get("max_global_cycle_rank_abs_pred")
+            abs_pred = payload.get("abs_predicted_return")
+            min_abs_pred_payload = payload.get("min_abs_predicted_return")
+
+            rank_failed = False
+            mag_failed = False
+            try:
+                if global_rank is not None and max_rank is not None:
+                    rank_failed = int(global_rank) > int(max_rank)
+            except Exception:
+                rank_failed = False
+            try:
+                if abs_pred is not None and min_abs_pred_payload is not None:
+                    mag_failed = float(abs_pred) < float(min_abs_pred_payload)
+            except Exception:
+                mag_failed = False
+
+            if rank_failed and mag_failed:
+                return "FAILED POLICY: not top-3 and predicted move too small"
+            if rank_failed:
+                return "FAILED POLICY: not top-3 in cycle"
+            if mag_failed:
+                return "FAILED POLICY: predicted move below threshold"
+            return "FAILED POLICY"
+
+        def _live_policy_requirement_bits(row: dict[str, Any]) -> str:
+            payload = {}
+            try:
+                payload = json.loads(row.get("decision_reason_json") or "{}")
+            except Exception:
+                payload = {}
+
+            bits: list[str] = []
+            if payload.get("global_cycle_rank_abs_pred") is not None and payload.get("max_global_cycle_rank_abs_pred") is not None:
+                try:
+                    current_rank = int(payload["global_cycle_rank_abs_pred"])
+                    max_rank = int(payload["max_global_cycle_rank_abs_pred"])
+                    if current_rank > max_rank:
+                        bits.append(f"rank {current_rank} > {max_rank}")
+                except Exception:
+                    pass
+            if payload.get("abs_predicted_return") is not None and payload.get("min_abs_predicted_return") is not None:
+                try:
+                    abs_pred = float(payload["abs_predicted_return"])
+                    min_required = float(payload["min_abs_predicted_return"])
+                    if abs_pred < min_required:
+                        bits.append(f"|pred| {abs_pred:.4f} < {min_required:.2f}")
+                except Exception:
+                    pass
+            return "  ".join(bits)
+
+        def _annotate_with_v5_metrics(row: dict[str, Any]) -> dict[str, Any]:
+            key = (
+                cycle_ts,
+                str(row.get("profile_id") or ""),
+                str(row.get("symbol") or "").upper(),
+                str(row.get("direction") or "").upper(),
+            )
+            metrics = dict(v5_rank_lookup.get(key) or {})
+            row = dict(row)
+            row["_v5_metrics"] = metrics
+            row["global_cycle_rank_abs_pred"] = metrics.get("global_cycle_rank_abs_pred")
+            return row
+
+        pre_live_rows = [_annotate_with_v5_metrics(row) for row in pre_live_rows]
+
+        def _passes_live_policy(row: dict[str, Any], live_policy_id: str, live_policy_cfg: dict[str, Any]) -> bool:
+            metrics = dict(row.get("_v5_metrics") or {})
+            eval_row = {
+                "conviction": metrics.get("conviction"),
+                "predicted_return": row.get("predicted_return"),
+                "target_horizon_bars": metrics.get("target_horizon_bars"),
+            }
+            result = self._evaluate_execution_policy(
+                live_policy_id,
+                live_policy_cfg,
+                row=eval_row,
+                asset_class=asset_class,
+                direction=row.get("direction"),
+                session_bucket=metrics.get("session_bucket"),
+                candidate_metrics=metrics,
+            )
+            row["_policy_eval"] = result
+            return bool(result.get("approved"))
+
+        cap_reason_codes = {
+            "PROFILE_DIRECTION_SELECTION_CAP",
+            "PROFILE_SELECTION_CAP",
+            "ASSET_CLASS_SELECTION_CAP",
+            "BASE_CURRENCY_SELECTION_CAP",
+            "BLOCKED_ACCOUNT_HEADROOM",
+        }
+        lines = [
+            f"🎯 <b>[{self._telegram_env_label()}] LIVE TRADE SHORTLIST</b> — {html.escape(cycle_ts[:16])}",
+            (
+                f"policy={html.escape(next(iter(policy_to_profile_ids.keys())))}"
+                if len(policy_to_profile_ids) == 1
+                else "policies=" + " | ".join(
+                    f"{html.escape(policy_id)} x{len(profile_ids)}"
+                    for policy_id, profile_ids in sorted(policy_to_profile_ids.items())
+                )
+            ),
+            f"tactical_bans={html.escape(self._tactical_bans_summary(asset_class))}",
+            f"routing_limit={html.escape(self._throughput_mode_summary())}",
+            self._build_session_status_block(asset_class=asset_class, profile_ids=active_profile_ids),
+            "",
+        ]
+        def _append_rows(title: str, rows_in: list[dict[str, Any]], formatter) -> None:
+            lines.append(f"━━ {title} ━━")
+            if rows_in:
+                for row in rows_in[:display_n]:
+                    for line in formatter(row):
+                        lines.append(line)
+            else:
+                lines.append("none")
+            lines.append("")
+
+        section_labels = {
+            "ACTIONABLE_NOT_ROUTED": "ACTIONABLE NOT ROUTED",
+            "TAKEN_LIVE": "TAKEN LIVE",
+            "BANNED": "BANNED",
+            "FAILED": "FAILED",
+            "OTHER": "OTHER",
+        }
+
+        def _fmt_executed_row(row: dict[str, Any]) -> list[str]:
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            qty = row.get("lot_size")
+            qty_text = "-" if qty is None else f"{float(qty):.2f}"
+            payload = {}
+            try:
+                payload = json.loads(row.get("decision_reason_json") or "{}")
+            except Exception:
+                payload = {}
+            rank = payload.get("global_cycle_rank_abs_pred")
+            if rank is None:
+                key = (
+                    cycle_ts,
+                    str(row.get("profile_id") or ""),
+                    symbol,
+                    direction,
+                )
+                rank = (v5_rank_lookup.get(key) or {}).get("global_cycle_rank_abs_pred")
+            rank_text = "-" if rank is None else str(int(rank))
+            return [
+                f"{emoji} {html.escape(symbol)} {html.escape(direction)}  rank={html.escape(rank_text)}  qty={html.escape(qty_text)}  entry={html.escape(_fmt_price(row.get('entry_price')))}  pred={html.escape(_fmt_pred(row))}",
+                "  PASSED POLICY AND EXECUTED",
+            ]
+
+        def _fmt_passed_cap_row(row: dict[str, Any]) -> list[str]:
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            reason = _pre_live_block_label(row)
+            return [
+                f"{emoji} {html.escape(symbol)} {html.escape(direction)}  pred={html.escape(_fmt_pred(row))}",
+                f"  PASSED POLICY BUT BLOCKED BY CAP/HEADROOM — {html.escape(reason.replace('BLOCKED: ', ''))}",
+            ]
+
+        def _fmt_passed_other_row(row: dict[str, Any]) -> list[str]:
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            reason = _pre_live_block_label(row)
+            return [
+                f"{emoji} {html.escape(symbol)} {html.escape(direction)}  pred={html.escape(_fmt_pred(row))}",
+                f"  PASSED POLICY BUT FAILED OTHER — {html.escape(reason.replace('BLOCKED: ', ''))}",
+            ]
+
+        def _fmt_failed_policy_row(row: dict[str, Any]) -> list[str]:
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            entry = row.get("entry_price")
+            detail = ""
+            if row.get("_policy_eval"):
+                detail = _live_policy_requirement_bits({"decision_reason_json": json.dumps((row.get("_policy_eval") or {}).get("reason_json") or {})})
+            else:
+                detail = _live_policy_requirement_bits(row)
+            label = _live_policy_block_label({"decision_reason_json": json.dumps((row.get("_policy_eval") or {}).get("reason_json") or {})}) if row.get("_policy_eval") else _live_policy_block_label(row)
+            first = f"{emoji} {html.escape(symbol)} {html.escape(direction)}  pred={html.escape(_fmt_pred(row))}"
+            if entry not in (None, ""):
+                first += f"  entry={html.escape(_fmt_price(entry))}"
+            second = f"  {html.escape(label)}"
+            if detail:
+                second += f"  {html.escape(detail)}"
+            return [first, second]
+
+        def _fmt_manual_row(row: dict[str, Any]) -> list[str]:
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            if str(row.get("execution_decision") or "").upper() == "EXECUTED":
+                payload = {}
+                try:
+                    payload = json.loads(row.get("decision_reason_json") or "{}")
+                except Exception:
+                    payload = {}
+                rank = payload.get("global_cycle_rank_abs_pred")
+                if rank is None:
+                    key = (
+                        cycle_ts,
+                        str(row.get("profile_id") or ""),
+                        symbol,
+                        direction,
+                    )
+                    rank = (v5_rank_lookup.get(key) or {}).get("global_cycle_rank_abs_pred")
+                rank_text = "-" if rank is None else str(int(rank))
+                return [
+                    f"{emoji} {html.escape(symbol)} {html.escape(direction)}  rank={html.escape(rank_text)}  pred={html.escape(_fmt_pred(row))}",
+                    "  MANUAL CANDIDATE — passed policy and executed live",
+                ]
+            reason = _pre_live_block_label(row).replace("BLOCKED: ", "")
+            return [
+                f"{emoji} {html.escape(symbol)} {html.escape(direction)}  pred={html.escape(_fmt_pred(row))}",
+                f"  MANUAL CANDIDATE — passed policy, blocked by {html.escape(reason)}",
+            ]
+
+        for policy_id, policy_profile_ids in sorted(policy_to_profile_ids.items()):
+            live_policy_cfg = dict(((runner_cfg.get("policies") or {}).get(policy_id) or {}))
+            max_global_rank = live_policy_cfg.get("max_global_cycle_rank_abs_pred")
+            min_abs_pred = live_policy_cfg.get("min_abs_predicted_return")
+            policy_profile_set = {str(pid or "").strip() for pid in policy_profile_ids if str(pid or "").strip()}
+            policy_live_rows = [
+                row for row in live_policy_rows
+                if str(row.get("profile_id") or "").strip() in policy_profile_set
+                and str(row.get("execution_policy_id") or "").strip() == policy_id
+            ]
+            policy_executed_rows = [row for row in policy_live_rows if str(row.get("execution_decision") or "").upper() == "EXECUTED"]
+            policy_pre_live_rows = [row for row in pre_live_rows if str(row.get("profile_id") or "").strip() in policy_profile_set]
+            passed_policy_pre_live = [
+                row for row in policy_pre_live_rows
+                if _passes_live_policy(row, policy_id, live_policy_cfg)
+            ]
+            passed_policy_cap = [
+                row for row in passed_policy_pre_live
+                if str(row.get("decision_reason_code") or "").upper() in cap_reason_codes
+            ]
+            passed_policy_other = [
+                row for row in passed_policy_pre_live
+                if str(row.get("decision_reason_code") or "").upper() not in cap_reason_codes
+            ]
+            manual_candidates = list(policy_executed_rows) + passed_policy_cap + passed_policy_other
+
+            audit_policy_filtered = 0
+            audit_tradeability_rows = 0
+            audit_tradeability_pass_rows = 0
+            audit_failed_checks: Counter[str] = Counter()
+            audit_selection_reasons: Counter[str] = Counter()
+            for row in cycle_audit_rows:
+                if str(row.get("profile_id") or "").strip() not in policy_profile_set:
+                    continue
+                if str(row.get("execution_policy_id") or "").strip() not in {"", policy_id}:
+                    continue
+                audit_policy_filtered += int(row.get("live_policy_filtered_rows") or 0)
+                audit_tradeability_rows += int(row.get("tradeability_rows") or 0)
+                audit_tradeability_pass_rows += int(row.get("tradeability_pass_rows") or 0)
+                try:
+                    audit_failed_checks.update({
+                        str(k): int(v or 0)
+                        for k, v in (json.loads(row.get("live_policy_failed_checks_json") or "{}") or {}).items()
+                    })
+                except Exception:
+                    pass
+                try:
+                    audit_selection_reasons.update({
+                        str(k): int(v or 0)
+                        for k, v in (json.loads(row.get("selection_reasons_json") or "{}") or {}).items()
+                    })
+                except Exception:
+                    pass
+
+            total_rows = len(policy_live_rows)
+            lines.append(f"━━ POLICY {html.escape(policy_id)} ━━")
+            lines.append(f"profiles={', '.join(html.escape(self._profile_display_label(pid)) for pid in policy_profile_ids)}")
+            if not policy_executed_rows:
+                live_counts = dict((summary or {}).get("live") or {}) if len(policy_to_profile_ids) == 1 else {}
+                skipped_policy = int(live_counts.get("rejected", 0) or 0) or audit_policy_filtered
+                total_considered = total_rows or skipped_policy or audit_tradeability_rows
+                lines.append("━━ NO LIVE PASS ━━")
+                lines.append("No FX pairs passed the full routing path this cycle.")
+                if total_considered:
+                    lines.append(f"considered={total_considered}  skipped_policy={skipped_policy}")
+                if audit_tradeability_pass_rows:
+                    route_candidate_rows = len(policy_executed_rows) + len(passed_policy_cap) + len(passed_policy_other)
+                    lines.append(f"tradeability_pass={audit_tradeability_pass_rows}  route_candidates={route_candidate_rows}")
+                if audit_selection_reasons:
+                    reason_bits = [
+                        f"{key}={value}"
+                        for key, value in sorted(audit_selection_reasons.items())
+                        if int(value or 0) > 0
+                    ]
+                    if reason_bits:
+                        lines.append(f"selection_reasons: {'  '.join(reason_bits)}")
+                if audit_failed_checks:
+                    failed_bits = [
+                        f"{key}={value}"
+                        for key, value in sorted(audit_failed_checks.items())
+                        if int(value or 0) > 0
+                    ]
+                    if failed_bits:
+                        lines.append(f"policy_failed_checks: {'  '.join(failed_bits)}")
+                lines.append("")
+            _append_rows("PASSED POLICY + EXECUTED", policy_executed_rows, _fmt_executed_row)
+            _append_rows("PASSED POLICY BUT BLOCKED BY CAP/HEADROOM", passed_policy_cap, _fmt_passed_cap_row)
+            _append_rows("PASSED POLICY BUT FAILED OTHER", passed_policy_other, _fmt_passed_other_row)
+            _append_rows("MANUAL CANDIDATES", manual_candidates, _fmt_manual_row)
+        return "\n".join(lines).rstrip()
+
+    def _dwx_bridge_recent_lifecycle_activity(self, profile_id: str, lookback_seconds: int = 180) -> dict[str, Any] | None:
+        """
+        Return the most recent close/modify lifecycle action on this profile within a short lookback.
+
+        DWX uses a single local file bridge for both closes and new entries. A brief quiet period
+        after lifecycle close activity avoids contaminating fresh entry submits with stale close
+        confirmations or bridge churn.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=int(lookback_seconds))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with sqlite_conn(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                """
+                SELECT request_id, action_type, trade_id, broker_position_id, status,
+                       COALESCE(finished_at_utc, submitted_at_utc, requested_at_utc) AS activity_ts_utc
+                FROM vanguard_execution_requests
+                WHERE profile_id = ?
+                  AND action_type IN ('CLOSE_POSITION', 'CLOSE_AT_TIMEOUT', 'SET_EXACT_SL_TP', 'MOVE_SL_TO_BREAKEVEN')
+                  AND COALESCE(finished_at_utc, submitted_at_utc, requested_at_utc) >= ?
+                ORDER BY COALESCE(finished_at_utc, submitted_at_utc, requested_at_utc) DESC, request_id DESC
+                LIMIT 1
+                """,
+                (profile_id, cutoff),
+            ).fetchone()
+        return dict(row) if row else None
+
     def _checkpoint_db_wal(self, *, min_wal_bytes: int = 256 * 1024 * 1024) -> None:
         """Run a controlled WAL checkpoint outside the hot DB connection path."""
         try:
@@ -1354,8 +3521,52 @@ class VanguardOrchestrator:
             return False
         return True
 
+    def _context_refresh_is_fresh(
+        self,
+        *,
+        profile_id: str,
+        context_source_id: str,
+        freshness_within_s: float,
+    ) -> bool:
+        if freshness_within_s <= 0:
+            return False
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as con:
+                row = con.execute(
+                    """
+                    SELECT finished_ts_utc, source_status, quotes_written, account_written
+                    FROM vanguard_context_ingest_runs
+                    WHERE profile_id = ?
+                      AND context_source_id = ?
+                    ORDER BY finished_ts_utc DESC
+                    LIMIT 1
+                    """,
+                    (profile_id, context_source_id),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            logger.debug(
+                "[CTX] refresh freshness check failed profile=%s source=%s err=%s",
+                profile_id,
+                context_source_id,
+                exc,
+            )
+            return False
+        if not row:
+            return False
+        finished_ts_utc, source_status, quotes_written, account_written = row
+        if str(source_status or "").upper() not in {"OK", "PARTIAL"}:
+            return False
+        if int(quotes_written or 0) <= 0 or int(account_written or 0) <= 0:
+            return False
+        try:
+            finished_dt = datetime.fromisoformat(str(finished_ts_utc).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        age_s = max(0.0, (datetime.now(timezone.utc) - finished_dt.astimezone(timezone.utc)).total_seconds())
+        return age_s <= freshness_within_s
+
     def _refresh_active_context_snapshots(self) -> dict[str, Any]:
-        """Refresh MT5-backed context truth for active profiles before V6."""
+        """Refresh broker-backed context truth for active profiles before V6."""
         runtime_cfg = self._runtime_config or get_runtime_config()
         refresh_cfg = ((runtime_cfg.get("runtime") or {}).get("context_refresh_before_v6") or {})
         if not bool(refresh_cfg.get("enabled", False)):
@@ -1363,6 +3574,7 @@ class VanguardOrchestrator:
 
         context_sources = runtime_cfg.get("context_sources") or {}
         subscribe_sleep_sec = float(refresh_cfg.get("subscribe_sleep_sec") or 0.35)
+        freshness_within_s = float(refresh_cfg.get("skip_if_fresh_within_s") or 45.0)
         report_dir = Path(str(refresh_cfg.get("coverage_report_dir") or "/tmp/vanguard_context_refresh"))
         _ensure_dwx_context_schema(self.db_path)
         runs: list[dict[str, Any]] = []
@@ -1375,7 +3587,26 @@ class VanguardOrchestrator:
             source_cfg = dict(context_sources.get(source_id) or {})
             if not source_cfg or not source_cfg.get("enabled", False):
                 continue
-            if str(source_cfg.get("source_type") or "").lower() != "dwx_mt5":
+            if self._context_refresh_is_fresh(
+                profile_id=profile_id,
+                context_source_id=source_id,
+                freshness_within_s=freshness_within_s,
+            ):
+                runs.append({
+                    "profile_id": profile_id,
+                    "context_source_id": source_id,
+                    "status": "SKIPPED_FRESH",
+                    "freshness_within_s": freshness_within_s,
+                })
+                logger.info(
+                    "[CTX] refresh skipped profile=%s source=%s reason=fresh_daemon_snapshot within=%.1fs",
+                    profile_id,
+                    source_id,
+                    freshness_within_s,
+                )
+                continue
+            source_type = str(source_cfg.get("source_type") or "").lower()
+            if source_type not in {"dwx_mt5", "metaapi_mt5"}:
                 continue
             source_cfg["_source_id"] = source_id
 
@@ -1392,30 +3623,6 @@ class VanguardOrchestrator:
             if not symbols:
                 continue
 
-            source_path = str(source_cfg.get("dwx_files_path") or "")
-            adapter = None
-            owns_adapter = False
-            if (
-                self._mt5_adapter is not None
-                and self._mt5_adapter.is_connected()
-                and str(Path(self._mt5_adapter.dwx_files_path).expanduser()) == str(Path(source_path).expanduser())
-            ):
-                adapter = self._mt5_adapter
-            else:
-                try:
-                    adapter = MT5DWXAdapter(
-                        dwx_files_path=source_path,
-                        db_path=self.db_path,
-                        symbol_suffix=str(source_cfg.get("symbol_suffix", ".x") or ""),
-                    )
-                    if not adapter.connect():
-                        logger.warning("[CTX] refresh connect failed profile=%s source=%s", profile_id, source_id)
-                        continue
-                    owns_adapter = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[CTX] refresh init failed profile=%s source=%s err=%s", profile_id, source_id, exc)
-                    continue
-
             try:
                 default_suffix = _dwx_resolve_default_suffix(source_cfg, None)
                 suffix_map = _dwx_resolve_symbol_suffix_map(
@@ -1424,18 +3631,66 @@ class VanguardOrchestrator:
                     asset_class_by_symbol,
                     default_suffix,
                 )
-                coverage = _dwx_collect_context_once(
-                    adapter=adapter,
-                    db_path=self.db_path,
-                    profile_id=profile_id,
-                    context_source_id=source_id,
-                    source_cfg=source_cfg,
-                    symbols=symbols,
-                    asset_class_by_symbol=asset_class_by_symbol,
-                    suffix_map=suffix_map,
-                    subscribe_sleep_sec=subscribe_sleep_sec,
-                    coverage_report=report_dir / f"{profile_id}_{source_id}.json",
-                )
+                if source_type == "dwx_mt5":
+                    source_path = str(source_cfg.get("dwx_files_path") or "")
+                    adapter = None
+                    owns_adapter = False
+                    if (
+                        self._mt5_adapter is not None
+                        and self._mt5_adapter.is_connected()
+                        and str(Path(self._mt5_adapter.dwx_files_path).expanduser()) == str(Path(source_path).expanduser())
+                    ):
+                        adapter = self._mt5_adapter
+                    else:
+                        try:
+                            adapter = MT5DWXAdapter(
+                                dwx_files_path=source_path,
+                                db_path=self.db_path,
+                                symbol_suffix=str(source_cfg.get("symbol_suffix", ".x") or ""),
+                            )
+                            if not adapter.connect():
+                                logger.warning("[CTX] refresh connect failed profile=%s source=%s", profile_id, source_id)
+                                continue
+                            owns_adapter = True
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("[CTX] refresh init failed profile=%s source=%s err=%s", profile_id, source_id, exc)
+                            continue
+                    try:
+                        coverage = _dwx_collect_context_once(
+                            adapter=adapter,
+                            db_path=self.db_path,
+                            profile_id=profile_id,
+                            context_source_id=source_id,
+                            source_cfg=source_cfg,
+                            symbols=symbols,
+                            asset_class_by_symbol=asset_class_by_symbol,
+                            suffix_map=suffix_map,
+                            subscribe_sleep_sec=subscribe_sleep_sec,
+                            coverage_report=report_dir / f"{profile_id}_{source_id}.json",
+                        )
+                    finally:
+                        if owns_adapter and adapter is not None:
+                            try:
+                                adapter.disconnect()
+                            except Exception:  # noqa: BLE001
+                                pass
+                else:
+                    try:
+                        metaapi_adapter = MetaApiContextAdapter(source_cfg=source_cfg, profile_id=profile_id)
+                        coverage = _metaapi_collect_context_once(
+                            adapter=metaapi_adapter,
+                            db_path=self.db_path,
+                            profile_id=profile_id,
+                            context_source_id=source_id,
+                            source_cfg=source_cfg,
+                            symbols=symbols,
+                            asset_class_by_symbol=asset_class_by_symbol,
+                            suffix_map=suffix_map,
+                            keep_subscription=bool(source_cfg.get("keep_subscription", True)),
+                        )
+                    except (MetaApiUnavailable, ValueError) as exc:
+                        logger.warning("[CTX] refresh init failed profile=%s source=%s err=%s", profile_id, source_id, exc)
+                        continue
                 runs.append({
                     "profile_id": profile_id,
                     "context_source_id": source_id,
@@ -1455,14 +3710,40 @@ class VanguardOrchestrator:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[CTX] refresh failed profile=%s source=%s err=%s", profile_id, source_id, exc)
-            finally:
-                if owns_adapter and adapter is not None:
-                    try:
-                        adapter.disconnect()
-                    except Exception:  # noqa: BLE001
-                        pass
 
         return {"enabled": True, "runs": runs}
+
+    def _finalize_early_cycle_exit(
+        self,
+        *,
+        cycle_ts: str,
+        result: dict[str, Any],
+        stage_timings: dict[str, float],
+        cycle_start: float,
+        refresh_context: bool,
+    ) -> dict[str, Any]:
+        """Finalize a healthy early exit and optionally refresh context/state first."""
+        if refresh_context:
+            try:
+                stage_start = time.time()
+                context_refresh = self._refresh_active_context_snapshots()
+                stage_timings["context_refresh"] = time.time() - stage_start
+                result["context_refresh"] = context_refresh
+            except Exception as exc:
+                logger.error("Context refresh failed: %s", exc, exc_info=True)
+                result["context_refresh_error"] = str(exc)
+                result["status"] = "context_refresh_error"
+                raise
+        self._attach_mt5_coverage_details(result)
+        self._log_context_state_diagnostics(cycle_ts)
+        try:
+            _refresh_cycle_audit(self.db_path, str(cycle_ts or ""))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[cycle_audit] refresh failed for early-exit cycle=%s: %s", cycle_ts, exc)
+        result["stage_timings"] = stage_timings
+        self._record_cycle_trace_result(result)
+        self._check_cycle_lag(cycle_start)
+        return result
 
     def _is_polling_asset_enabled(
         self,
@@ -1473,8 +3754,8 @@ class VanguardOrchestrator:
         normalized = str(asset_class or "").lower().strip()
         if not normalized:
             return False
-        if normalized in self._force_assets:
-            return True
+        if self._force_assets and normalized not in self._force_assets:
+            return False
         return _is_asset_session_active(normalized, et or self._now_et())
 
     def _is_live_routing_asset_allowed(self, asset_class: str, account_id: str = "") -> bool:
@@ -1537,6 +3818,9 @@ class VanguardOrchestrator:
             t = time.time()
             _ensure_execution_log(self.db_path)
             logger.info("[BOOT] ensure_execution_log took %.2fs", time.time() - t)
+            t = time.time()
+            _ensure_execution_attempts(self.db_path)
+            logger.info("[BOOT] ensure_execution_attempts took %.2fs", time.time() - t)
 
             t = time.time()
             self._ensure_session_log()
@@ -1565,20 +3849,29 @@ class VanguardOrchestrator:
             logger.info("[BOOT] upsert_session_log took %.2fs", time.time() - t)
 
         msg = (
-            f"🚀 <b>VANGUARD SESSION START</b>\n"
+            f"🚀 <b>[{self._telegram_env_label()}] VANGUARD SESSION START</b>\n"
             f"Date:     {self._session_date}\n"
             f"Mode:     {self.execution_mode.upper()}\n"
             f"Window:   {self.session_start}–{self.session_end} ET\n"
-            f"Accounts: {', '.join(a['id'] for a in self._accounts) or 'none'}"
+            f"Accounts: {', '.join(str(a.get('name') or a.get('id') or '') for a in self._accounts) or 'none'}\n"
+            f"Tactical bans: {self._tactical_bans_summary('forex')}\n"
+            f"Routing limit: {self._throughput_mode_summary()}"
         )
         logger.info("Session start: %s mode=%s", self._session_date, self.execution_mode)
         logger.info("[BOOT] startup total took %.2fs", time.time() - boot_t0)
-        self._send_telegram(msg)
+        self._send_telegram(msg, message_type="LIFECYCLE")
+        self._send_telegram(
+            self._build_live_policy_contract_telegram(asset_class="forex"),
+            message_type="POLICY_DIGEST",
+        )
 
     def _main_loop(self) -> None:
         """5-minute cycle loop. Runs until session ends, shutdown, or too many failures."""
+        first_cycle = True
         while not self._shutdown_requested:
             et = self._now_et()
+            result: dict[str, Any] | None = None
+            shadow_summary: dict[str, Any] | None = None
 
             if not self.is_within_session(et):
                 if self._was_in_session_before(et):
@@ -1588,28 +3881,98 @@ class VanguardOrchestrator:
                 time.sleep(30)
                 continue
 
+            if first_cycle and self.cycle_interval_seconds == CYCLE_MINUTES * 60 and self.cycle_offset_seconds > 0:
+                logger.info(
+                    "Aligning first cycle to offset=%ss within the 5-minute cadence",
+                    self.cycle_offset_seconds,
+                )
+                self._wait_for_next_bar()
             try:
                 result = self.run_cycle()
                 self._total_cycles += 1
+                first_cycle = False
 
                 if result.get("status") == "ok":
                     self._consecutive_failures = 0
                     if result.get("approved", 0) > 0:
                         self._execute_approved(result.get("cycle_ts"))
+                    else:
+                        live_shortlist_msg = self._build_live_trade_shortlist_telegram(
+                            str(result.get("cycle_ts") or ""),
+                            {
+                                "live": {
+                                    "policy_id": str(
+                                        (
+                                            self._load_execution_policy_runner_config("forex") or {}
+                                        ).get("live_policy_id")
+                                        or ""
+                                    ),
+                                    "approved": 0,
+                                    "executed": 0,
+                                    "filled": 0,
+                                    "failed": 0,
+                                    "forward_tracked": 0,
+                                    "rejected": 0,
+                                }
+                            },
+                        )
+                        if live_shortlist_msg:
+                            self._send_telegram(live_shortlist_msg, message_type="SHORTLIST")
+
+                    # Shadow Eval V2 — observational only. Runs AFTER
+                    # _execute_approved so decision_log rows for the cycle
+                    # exist. ZERO effect on live routing. Any failure is
+                    # swallowed so a broken evaluator never affects trading.
+                    try:
+                        from vanguard.analytics.policy_shadow_eval import evaluate_and_log_cycle_from_context
+                        _shadow_summary = evaluate_and_log_cycle_from_context(
+                            db_path=self.db_path,
+                            runtime_config=self._runtime_config or {},
+                            cycle_ts_utc=result.get("cycle_ts") or "",
+                            profile_id="ftmo_demo_100k",
+                            asset_class="forex",
+                        )
+                        shadow_summary = dict(_shadow_summary or {})
+                        if _shadow_summary.get("enabled"):
+                            logger.info(
+                                "[shadow_eval] cycle=%s rows=%d cands=%d run=%s",
+                                result.get("cycle_ts"),
+                                _shadow_summary.get("rows_written", 0),
+                                _shadow_summary.get("n_candidates", 0),
+                                _shadow_summary.get("shadow_run_id", "?"),
+                            )
+                    except Exception as _shadow_exc:   # noqa: BLE001
+                        logger.warning("[shadow_eval] skipped: %s", _shadow_exc)
+
                     if not self._is_test_execution_mode():
                         # BUG 19: checkpoint every cycle (not just when WAL >256MB)
                         # so WAL doesn't grow unbounded and FD pressure stays flat.
                         self._checkpoint_db_wal(min_wal_bytes=0)
+                    try:
+                        _refresh_cycle_audit(self.db_path, str(result.get("cycle_ts") or ""))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("[cycle_audit] refresh failed cycle=%s: %s", result.get("cycle_ts"), exc)
+                    self._upsert_orchestrator_service_state(
+                        status="OK",
+                        cycle_ts_utc=str(result.get("cycle_ts") or ""),
+                    )
                 else:
                     logger.warning("Cycle non-ok status: %s", result.get("status"))
+                    self._upsert_orchestrator_service_state(
+                        status=str(result.get("status") or "WARN").upper(),
+                        cycle_ts_utc=str(result.get("cycle_ts") or ""),
+                    )
 
             except Exception as exc:
                 self._failed_cycles        += 1
                 self._consecutive_failures += 1
+                self._record_cycle_trace_error(exc)
+                self._upsert_orchestrator_service_state(status="ERROR", error=exc)
                 logger.error("Cycle error: %s", exc, exc_info=True)
                 self._send_telegram(
                     f"⚠️ <b>CYCLE ERROR</b>\nError: {exc}\n"
-                    f"Consecutive failures: {self._consecutive_failures}/{MAX_CONSECUTIVE_FAILS}"
+                    f"Consecutive failures: {self._consecutive_failures}/{MAX_CONSECUTIVE_FAILS}",
+                    message_type="ERROR",
                 )
                 if self._consecutive_failures >= MAX_CONSECUTIVE_FAILS:
                     logger.error(
@@ -1617,10 +3980,19 @@ class VanguardOrchestrator:
                     )
                     self._send_telegram(
                         f"🚨 <b>SESSION ABORTED</b>\n"
-                        f"Reason: {MAX_CONSECUTIVE_FAILS} consecutive cycle failures"
+                        f"Reason: {MAX_CONSECUTIVE_FAILS} consecutive cycle failures",
+                        message_type="ERROR",
                     )
                     self._upsert_session_log(status="aborted")
                     return
+            finally:
+                if result is not None:
+                    self._record_cycle_trace_result(result)
+                    if shadow_summary:
+                        self._record_cycle_trace_shadow(result.get("cycle_ts") or "", shadow_summary)
+                    self._flush_cycle_trace(status=str(result.get("status") or "unknown"))
+                elif self._active_cycle_trace:
+                    self._flush_cycle_trace(status="exception")
 
             self._log_loop_db_health()
 
@@ -1665,7 +4037,7 @@ class VanguardOrchestrator:
             )
 
         msg = (
-            f"🏁 <b>VANGUARD SESSION END</b>\n"
+            f"🏁 <b>[{self._telegram_env_label()}] VANGUARD SESSION END</b>\n"
             f"Date:             {self._session_date}\n"
             f"Mode:             {self.execution_mode.upper()}\n"
             f"Total cycles:     {self._total_cycles}\n"
@@ -1680,7 +4052,17 @@ class VanguardOrchestrator:
         )
         if not self._is_test_execution_mode():
             self._checkpoint_db_wal()
-        self._send_telegram(msg)
+        self._send_telegram(msg, message_type="LIFECYCLE")
+
+    def _release_v1_market_data_adapters(self, *, release_mt5: bool = True) -> None:
+        """Release long-lived V1 adapters when a caller only needs one polling cycle."""
+        if release_mt5 and self._mt5_adapter is not None:
+            try:
+                self._mt5_adapter.disconnect()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[V1] Could not disconnect MT5 DWX adapter cleanly: %s", exc)
+            finally:
+                self._mt5_adapter = None
 
     # ------------------------------------------------------------------
     # Timing helpers
@@ -1710,7 +4092,7 @@ class VanguardOrchestrator:
         if self.cycle_interval_seconds == CYCLE_MINUTES * 60:
             bar_open = round_down_5m(utc_now)
             next_bar = bar_open + timedelta(minutes=CYCLE_MINUTES)
-            target   = next_bar + timedelta(seconds=CYCLE_BUFFER_SECONDS)
+            target   = next_bar + timedelta(seconds=CYCLE_BUFFER_SECONDS + self.cycle_offset_seconds)
         else:
             next_bar = utc_now + timedelta(seconds=self.cycle_interval_seconds)
             target = next_bar
@@ -1720,8 +4102,9 @@ class VanguardOrchestrator:
             sleep_secs = CYCLE_BUFFER_SECONDS
 
         logger.info(
-            "Next cycle in %.0fs (bar=%s UTC)",
+            "Next cycle in %.0fs (bar=%s UTC, offset=%ss)",
             sleep_secs, next_bar.strftime("%H:%M"),
+            self.cycle_offset_seconds if self.cycle_interval_seconds == CYCLE_MINUTES * 60 else 0,
         )
 
         deadline = time.monotonic() + sleep_secs
@@ -1754,9 +4137,14 @@ class VanguardOrchestrator:
             logger.info("[config_reload] config file changed or reload flag set — reloading")
             new_cfg = load_runtime_config(self._config_path, refresh=True)
             self._runtime_config = new_cfg
+            self._accounts = _load_accounts(self.db_path)
             self._config_mtime = current_mtime
             new_version = (new_cfg or {}).get("config_version", "unknown")
-            logger.info("[config_reload] reload OK — config_version=%s", new_version)
+            logger.info(
+                "[config_reload] reload OK — config_version=%s active_profiles=%s",
+                new_version,
+                [str(account.get("id") or "") for account in (self._accounts or [])],
+            )
         except Exception as exc:
             logger.error(
                 "[config_reload] reload FAILED — keeping previous config. Error: %s", exc
@@ -1783,6 +4171,7 @@ class VanguardOrchestrator:
             dry_run = self.dry_run
 
         cycle_ts = self._force_cycle_ts if self._force_cycle_ts else iso_utc(self._now_utc())
+        self._start_cycle_trace(cycle_ts)
         self._refresh_forward_checkpoints()
         self._refresh_signal_forward_checkpoints()
         logger.info(
@@ -1794,51 +4183,42 @@ class VanguardOrchestrator:
         stage_timings: dict[str, float] = {}
 
         # ── Phase 2a: Resolve active universe ─────────────────────────
-        in_scope_symbols: list[str] | None = None
-        if self._runtime_config is not None:
-            try:
-                from vanguard.accounts.runtime_universe import resolve_universe_for_cycle
-                from datetime import timezone as _tz
-                cycle_dt = parse_utc(cycle_ts).replace(tzinfo=_tz.utc)
-                self._current_resolved_universe = resolve_universe_for_cycle(
-                    self._runtime_config, cycle_dt
-                )
-                ru = self._current_resolved_universe
-                logger.info(
-                    "[Phase2a] Resolved universe: mode=%s profiles=%s classes=%s symbols=%d",
-                    ru.mode, ru.active_profile_ids, ru.expected_asset_classes, len(ru.in_scope_symbols),
-                )
-                # Write log row
-                self._write_resolved_universe_log(ru)
-                if ru.mode == "enforce":
-                    in_scope_symbols = ru.in_scope_symbols
-                else:
-                    logger.info(
-                        "[Phase2a] OBSERVE mode — pipeline unconstrained. "
-                        "WOULD have filtered to %d symbols: %s",
-                        len(ru.in_scope_symbols), ru.in_scope_symbols[:10],
-                    )
-            except Exception as exc:
-                logger.warning("[Phase2a] Universe resolver failed: %s — continuing without filter", exc)
+        in_scope_symbols = self._resolve_runtime_universe_for_cycle(cycle_ts)
 
         # ── V1: Stage 1 multi-source bar freshness ────────────────────
-        try:
-            stage_start = time.time()
-            v1_result = self._run_v1(in_scope_symbols=in_scope_symbols)
-            stage_timings["v1"] = time.time() - stage_start
+        result["v1_cache_used"] = False
+        v1_cache_cfg = self._get_v1_precompute_config()
+        v1_state = self._load_v1_precompute_state() if bool(v1_cache_cfg.get("enabled")) else None
+        if self._is_v1_precompute_state_fresh(v1_state):
+            details = (v1_state or {}).get("details") or {}
+            v1_result = dict(details.get("v1_result") or {})
             result.update(v1_result)
+            result["v1_cache_used"] = True
+            result["v1_cache_cycle_ts_utc"] = details.get("cycle_ts_utc")
+            stage_timings["v1"] = 0.0
             logger.info(
-                "V1 complete: alpaca_bars=%d, td_bars=%d, bars_5m=%d, bars_1h=%d, source_health=%d, elapsed=%.2fs",
-                v1_result.get("v1_alpaca_bars", 0),
-                v1_result.get("v1_td_bars", 0),
-                v1_result.get("v1_bars_5m", 0),
-                v1_result.get("v1_bars_1h", 0),
+                "V1 cache hit: cycle_ts=%s source_health=%d",
+                details.get("cycle_ts_utc"),
                 v1_result.get("v1_source_health", 0),
-                stage_timings["v1"],
             )
-        except Exception as exc:
-            logger.error("V1 data step failed: %s", exc, exc_info=True)
-            result["v1_error"] = str(exc)
+        else:
+            try:
+                stage_start = time.time()
+                v1_result = self._run_v1(in_scope_symbols=in_scope_symbols)
+                stage_timings["v1"] = time.time() - stage_start
+                result.update(v1_result)
+                logger.info(
+                    "V1 complete: alpaca_bars=%d, td_bars=%d, bars_5m=%d, bars_1h=%d, source_health=%d, elapsed=%.2fs",
+                    v1_result.get("v1_alpaca_bars", 0),
+                    v1_result.get("v1_td_bars", 0),
+                    v1_result.get("v1_bars_5m", 0),
+                    v1_result.get("v1_bars_1h", 0),
+                    v1_result.get("v1_source_health", 0),
+                    stage_timings["v1"],
+                )
+            except Exception as exc:
+                logger.error("V1 data step failed: %s", exc, exc_info=True)
+                result["v1_error"] = str(exc)
 
         # ── V2: Health / survivors ─────────────────────────────────────
         try:
@@ -1880,12 +4260,15 @@ class VanguardOrchestrator:
             )
             if not survivors:
                 logger.warning("V2 produced 0 survivors — skipping V3-V6")
-                self._log_context_state_diagnostics(cycle_ts)
                 result["status"] = "no_survivors"
                 result["approved"] = 0
-                result["stage_timings"] = stage_timings
-                self._check_cycle_lag(cycle_start)
-                return result
+                return self._finalize_early_cycle_exit(
+                    cycle_ts=cycle_ts,
+                    result=result,
+                    stage_timings=stage_timings,
+                    cycle_start=cycle_start,
+                    refresh_context=True,
+                )
         except Exception as exc:
             logger.error("V2 prefilter failed: %s", exc, exc_info=True)
             result["v2_error"] = str(exc)
@@ -1893,14 +4276,26 @@ class VanguardOrchestrator:
             raise
 
         # ── V3: Factor Engine ──────────────────────────────────────────
+        # Delegates to pipeline/stages/v2_feature_matrix.py per STAGE_CONTRACTS.md.
         try:
-            from stages.vanguard_factor_engine import run as v3_run
+            from pipeline.stages.v2_feature_matrix import FeatureMatrixStage
+            from pipeline.contracts import run_stage_with_audit
             stage_start = time.time()
-            v3_result = v3_run(survivors=survivors, cycle_ts=cycle_ts, dry_run=dry_run)
+            _stage = FeatureMatrixStage()
+            _stage_cfg = {"feature_matrix": {"dry_run": dry_run, "survivors": survivors}}
+            with sqlite3.connect(self.db_path, timeout=30) as _audit_con:
+                _stage_result = run_stage_with_audit(
+                    _stage, cycle_ts, _audit_con, cfg=_stage_cfg,
+                )
             stage_timings["v3"] = time.time() - stage_start
-            result["v3_symbols"] = len(v3_result) if isinstance(v3_result, list) else 0
-            logger.info("V3 complete: %d symbols, elapsed=%.2fs", result["v3_symbols"], stage_timings["v3"])
-            self._log_chain_integrity(survivors, v3_result, cycle_ts)
+            v3_symbols_count = _stage_result.rows_written
+            result["v3_symbols"] = v3_symbols_count
+            result["v3_stage_status"] = _stage_result.status
+            logger.info(
+                "V3 complete: %d symbols, elapsed=%.2fs (via pipeline.stages.v2_feature_matrix, stage_status=%s)",
+                v3_symbols_count, stage_timings["v3"], _stage_result.status,
+            )
+            self._log_chain_integrity(survivors, [{}] * v3_symbols_count, cycle_ts)
         except Exception as exc:
             logger.error("V3 factor engine failed: %s", exc, exc_info=True)
             result["v3_error"]   = str(exc)
@@ -1909,74 +4304,131 @@ class VanguardOrchestrator:
             raise
 
         # ── V4B: Regressor scorer ─────────────────────────────────────
+        # Delegates to pipeline/stages/v3_model_score.py per STAGE_CONTRACTS.md.
         try:
-            from stages.vanguard_scorer import run as v4b_run
+            from pipeline.stages.v3_model_score import ModelScoreStage
+            from pipeline.contracts import run_stage_with_audit
             stage_start = time.time()
-            v4b_result = v4b_run(dry_run=dry_run)
+            _stage = ModelScoreStage()
+            _stage_cfg = {"model_score": {"dry_run": dry_run}}
+            with sqlite3.connect(self.db_path, timeout=30) as _audit_con:
+                _stage_result = run_stage_with_audit(
+                    _stage, cycle_ts, _audit_con, cfg=_stage_cfg,
+                )
             stage_timings["v4b"] = time.time() - stage_start
-            v4b_status = v4b_result.get("status", "unknown") if isinstance(v4b_result, dict) else "unknown"
-            v4b_rows = v4b_result.get("rows", 0) if isinstance(v4b_result, dict) else 0
+            v4b_status = _stage_result.observations.get("scorer_status", "unknown")
+            v4b_rows = _stage_result.rows_written
             result["v4b_status"] = v4b_status
             result["v4b_rows"] = v4b_rows
+            result["v4b_stage_status"] = _stage_result.status
+            result["v4b_stage_reason"] = _stage_result.reason
             logger.info(
-                "V4B complete: status=%s, rows=%d, elapsed=%.2fs",
-                v4b_status, v4b_rows, stage_timings["v4b"],
+                "V4B complete: status=%s, rows=%d, elapsed=%.2fs (via pipeline.stages.v3_model_score, stage_status=%s)",
+                v4b_status, v4b_rows, stage_timings["v4b"], _stage_result.status,
             )
             if v4b_rows == 0 or v4b_status in ("no_features", "no_models"):
                 logger.warning("V4B produced 0 predictions — skipping V5/V6")
                 result["status"] = "no_predictions"
                 result["approved"] = 0
-                result["stage_timings"] = stage_timings
-                self._check_cycle_lag(cycle_start)
-                return result
+                return self._finalize_early_cycle_exit(
+                    cycle_ts=cycle_ts,
+                    result=result,
+                    stage_timings=stage_timings,
+                    cycle_start=cycle_start,
+                    refresh_context=True,
+                )
         except Exception as exc:
             logger.error("V4B scorer failed: %s", exc, exc_info=True)
             result["v4b_error"] = str(exc)
             result["status"] = "v4b_error"
             raise
 
-        # ── V5: Selection ──────────────────────────────────────────────
-        try:
-            v5_cfg = (self._runtime_config or {}).get("v5") or {}
-            active_profile_ids = [str(account.get("id") or "") for account in (self._accounts or []) if str(account.get("id") or "").strip()]
-            if str(v5_cfg.get("selection_engine") or "simple_legacy") == "tradeability_v1":
-                from stages.vanguard_selection_tradeability import run as v5_run
-                v5_kwargs = {"dry_run": dry_run, "cycle_ts_utc": cycle_ts, "profile_ids": active_profile_ids}
-            else:
-                from stages.vanguard_selection_simple import run as v5_run
-                v5_kwargs = {"dry_run": dry_run, "profile_ids": active_profile_ids}
-            stage_start = time.time()
-            v5_result = v5_run(**v5_kwargs)
-            stage_timings["v5"] = time.time() - stage_start
-            v5_status = v5_result.get("status", "unknown") if isinstance(v5_result, dict) else "unknown"
-            v5_rows   = v5_result.get("rows", 0)   if isinstance(v5_result, dict) else 0
-            result["v5_status"]     = v5_status
-            result["v5_candidates"] = v5_rows
-            logger.info(
-                "V5 complete: status=%s, candidates=%d, elapsed=%.2fs",
-                v5_status, v5_rows, stage_timings["v5"],
-            )
-
-            if v5_rows == 0 or v5_status in ("no_predictions", "no_candidates", "no_features", "skipped"):
-                logger.warning("V5 produced 0 candidates — skipping V6")
-                self._log_context_state_diagnostics(cycle_ts)
-                result["status"]   = "no_candidates"
-                result["approved"] = 0
-                result["stage_timings"] = stage_timings
-                self._check_cycle_lag(cycle_start)
-                return result
-
-        except Exception as exc:
-            logger.error("V5 selection failed: %s", exc, exc_info=True)
-            result["v5_error"] = str(exc)
-            result["status"]   = "v5_error"
-            raise   # triggers consecutive failure counter
-
         try:
             stage_start = time.time()
             context_refresh = self._refresh_active_context_snapshots()
             stage_timings["context_refresh"] = time.time() - stage_start
             result["context_refresh"] = context_refresh
+        except Exception as exc:
+            logger.error("Context refresh failed: %s", exc, exc_info=True)
+            result["context_refresh_error"] = str(exc)
+            result["status"] = "context_refresh_error"
+            raise
+
+        # ── V5.2: Selection (delegated to pipeline) ───────────────────
+        try:
+            v5_cfg = (self._runtime_config or {}).get("v5") or {}
+            active_profile_ids = [str(account.get("id") or "") for account in (self._accounts or []) if str(account.get("id") or "").strip()]
+            selection_engine = str(v5_cfg.get("selection_engine") or "simple_legacy")
+
+            from pipeline.stages.v5_selection import SelectionStage
+            from pipeline.stages.v6_risk_filters import RiskFiltersStage
+            from pipeline.contracts import run_stage_with_audit
+
+            stage_start = time.time()
+            _selection_stage = SelectionStage()
+            _selection_cfg = {"selection": {
+                "dry_run": dry_run,
+                "selection_engine": selection_engine,
+                "profile_ids": active_profile_ids,
+                "runtime_cfg": self._runtime_config,
+            }}
+            with sqlite3.connect(self.db_path, timeout=30) as _audit_con:
+                _selection_stage_result = run_stage_with_audit(
+                    _selection_stage, cycle_ts, _audit_con, cfg=_selection_cfg,
+                )
+            stage_timings["v5_2"] = time.time() - stage_start
+            v5_status = _selection_stage_result.observations.get("selection_status", "unknown")
+            v5_rows = int(_selection_stage_result.observations.get("selection_rows") or 0)
+            result["v5_status"] = v5_status
+            result["v5_candidates"] = v5_rows
+            result["v5_stage_status"] = _selection_stage_result.status
+            logger.info(
+                "V5.2 complete: sel_status=%s sel_rows=%d elapsed=%.2fs (via pipeline.stages.v5_selection, stage_status=%s)",
+                v5_status, v5_rows, stage_timings["v5_2"], _selection_stage_result.status,
+            )
+
+            if _selection_stage_result.status == "SKIPPED":
+                logger.warning("V5 produced 0 candidates — skipping downstream")
+                result["status"] = "no_candidates"
+                result["approved"] = 0
+                return self._finalize_early_cycle_exit(
+                    cycle_ts=cycle_ts,
+                    result=result,
+                    stage_timings=stage_timings,
+                    cycle_start=cycle_start,
+                    refresh_context=True,
+                )
+
+            # ── V6: Risk Filters (delegated to pipeline) ──────────────
+            stage_start = time.time()
+            _risk_stage = RiskFiltersStage()
+            _risk_cfg = {"risk_filters": {
+                "dry_run": dry_run,
+                "runtime_cfg": self._runtime_config,
+            }}
+            with sqlite3.connect(self.db_path, timeout=30) as _audit_con:
+                _risk_stage_result = run_stage_with_audit(
+                    _risk_stage, cycle_ts, _audit_con, cfg=_risk_cfg,
+                )
+            stage_timings["v6"] = time.time() - stage_start
+            v6_status = _risk_stage_result.observations.get("risk_filters_status", "unknown")
+            v6_rows = int(_risk_stage_result.observations.get("risk_filters_rows") or 0)
+            result["v6_status"] = v6_status
+            result["v6_rows"] = v6_rows
+            result["v6_stage_status"] = _risk_stage_result.status
+            logger.info(
+                "V6 complete: risk_status=%s risk_rows=%d elapsed=%.2fs (via pipeline.stages.v6_risk_filters, stage_status=%s)",
+                v6_status, v6_rows, stage_timings["v6"], _risk_stage_result.status,
+            )
+
+        except Exception as exc:
+            logger.error("V5.2/V6 delegated stage failed: %s", exc, exc_info=True)
+            result["v5_v6_error"] = str(exc)
+            result["status"] = "v5_v6_error"
+            raise
+
+        try:
+            self._attach_mt5_coverage_details(result)
             self._log_context_state_diagnostics(cycle_ts)
         except Exception as exc:
             logger.error("Context refresh failed: %s", exc, exc_info=True)
@@ -1984,42 +4436,15 @@ class VanguardOrchestrator:
             result["status"] = "context_refresh_error"
             raise
 
-        # ── V6: Risk Filters ───────────────────────────────────────────
-        try:
-            from stages.vanguard_risk_filters import run as v6_run
-            stage_start = time.time()
-            v6_result = v6_run(dry_run=dry_run, cycle_ts=cycle_ts)
-            stage_timings["v6"] = time.time() - stage_start
-            v6_status = v6_result.get("status", "unknown") if isinstance(v6_result, dict) else "unknown"
-            v6_rows   = v6_result.get("rows", 0)   if isinstance(v6_result, dict) else 0
-            result["v6_status"] = v6_status
-            result["v6_rows"]   = v6_rows
-            logger.info(
-                "V6 complete: status=%s, rows=%d, elapsed=%.2fs",
-                v6_status, v6_rows, stage_timings["v6"],
-            )
-            self._log_v6_diagnostics(cycle_ts)
-
-            approved          = _get_approved_rows(self.db_path, cycle_ts)
-            result["approved"] = len(approved)
-            logger.info("Approved for execution: %d", len(approved))
-
-            shortlist_msg = self._build_shortlist_telegram(cycle_ts)
-            logger.info("[TELEGRAM] Shortlist msg built: %s", "yes" if shortlist_msg else "empty/None")
-            if shortlist_msg:
-                self._send_telegram(shortlist_msg)
-            diagnostics_msg = self._build_operator_diagnostics_telegram(cycle_ts)
-            logger.info("[TELEGRAM] Diagnostics msg built: %s", "yes" if diagnostics_msg else "empty/None")
-            if diagnostics_msg:
-                self._send_telegram(diagnostics_msg)
-
-        except Exception as exc:
-            logger.error("V6 risk filters failed: %s", exc, exc_info=True)
-            result["v6_error"] = str(exc)
-            result["status"]   = "v6_error"
-            raise   # triggers consecutive failure counter
+        self._log_v6_diagnostics(cycle_ts)
+        approved = _get_approved_rows(self.db_path, cycle_ts)
+        if not approved:
+            result["decision_log_emit"] = self._emit_nonapproved_cycle_decisions(cycle_ts)
+        result["approved"] = len(approved)
+        logger.info("Approved for execution: %d", len(approved))
 
         result["stage_timings"] = stage_timings
+        self._record_cycle_trace_result(result)
         logger.info("[V7] Stage timings: %s", {k: round(v, 2) for k, v in stage_timings.items()})
         self._check_cycle_lag(cycle_start)
         return result
@@ -2107,7 +4532,14 @@ class VanguardOrchestrator:
                     equity_symbols_override=configured_equity,
                 )
             else:
-                written = materialize_universe_members(self._vg_db, now_utc_str=now_utc_str)
+                logger.info(
+                    "[BOOT] enforce mode — no configured equity symbols for active scopes; skipping equity materialization"
+                )
+                written = materialize_universe_members(
+                    self._vg_db,
+                    now_utc_str=now_utc_str,
+                    skip_equity=True,
+                )
         else:
             # Observe mode: full Alpaca materialization (legacy behavior)
             written = materialize_universe_members(self._vg_db, now_utc_str=now_utc_str)
@@ -2183,10 +4615,13 @@ class VanguardOrchestrator:
                 for key in getattr(self._ibkr_adapter, "valid_contracts", {}).keys()
             )
         )
+        disable_alpaca_ws = bool(getattr(self, "_disable_alpaca_ws", False))
         if use_ibkr_equity and has_ibkr_equity_stream:
             logger.info("[V1] Equity source=%s → skipping Alpaca WebSocket because IBKR owns equities", self.equity_data_source)
+        elif disable_alpaca_ws and equity_symbols and equity_session_active:
+            logger.info("[V1] Alpaca WebSocket disabled for this orchestrator instance; using REST-only equity polling")
         if equity_symbols and equity_session_active and self._alpaca_adapter is None:
-            if not (use_ibkr_equity and has_ibkr_equity_stream):
+            if not (use_ibkr_equity and has_ibkr_equity_stream) and not disable_alpaca_ws:
                 try:
                     self._alpaca_adapter = AlpacaWSAdapter(equity_symbols, db_path=self.db_path)
                     self._alpaca_task = threading.Thread(
@@ -2209,8 +4644,15 @@ class VanguardOrchestrator:
             except Exception as exc:
                 logger.warning("[V1] Could not initialize Twelve Data adapter: %s", exc)
         if self._mt5_adapter is None:
-            mt5_cfg = _resolve_active_mt5_local_config(get_runtime_config())
-            if mt5_cfg.get("enabled"):
+            runtime_cfg = get_runtime_config()
+            mt5_asset_classes = _expand_mt5_asset_classes({
+                asset_class
+                for asset_class in {"equity", "forex", "crypto", "index", "commodity", "metal", "energy", "agriculture", "futures"}
+                if self._is_polling_asset_enabled(asset_class)
+                and resolve_market_data_source_id(asset_class, runtime_config=runtime_cfg) == "mt5_local"
+            })
+            mt5_cfg = _resolve_active_mt5_local_config(runtime_cfg)
+            if mt5_asset_classes and mt5_cfg.get("enabled"):
                 try:
                     self._mt5_adapter = MT5DWXAdapter(
                         dwx_files_path=mt5_cfg["dwx_files_path"],
@@ -2329,6 +4771,119 @@ class VanguardOrchestrator:
             )
         return {"ibkr_equity_bars": equity_written, "ibkr_forex_bars": forex_written}
 
+    def _resolve_v1_source_plan(
+        self,
+        runtime_cfg: dict,
+        active_profile_ids: list[str],
+    ) -> dict[str, dict]:
+        """Build a per-asset-class routing plan for V1 bar ingestion.
+
+        Returns: {asset_class: {
+            "primary_source_id": str,   # from lane policy or legacy resolver
+            "primary_profile_id": str | None,  # which profile's lane policy applied
+            "freshness_max_s": int | None,
+            "fallback_ids": list[str],
+            "primary_age_s": float | None,
+            "fallback_needed": bool,
+            "fallback_reason": str | None,
+        }}
+
+        Staleness is computed by querying max(bar_ts_utc) from vanguard_bars_1m
+        for (symbol in any active-profile universe for this asset class) limited
+        to rows where data_source matches the primary family. A non-TD primary
+        (metaapi, mt5_local) triggers fallback when bars exceed freshness_max_s.
+        """
+        from vanguard.config.runtime_config import (
+            resolve_market_data_source_id as _rmsi,
+            resolve_market_data_policy as _rmp,
+        )
+        from datetime import datetime, timezone
+
+        plan: dict[str, dict] = {}
+        # Union of asset classes across all active profiles.
+        active_asset_classes: set[str] = set()
+        for pid in active_profile_ids:
+            for prof in runtime_cfg.get("profiles") or []:
+                if str(prof.get("id") or "") != pid:
+                    continue
+                for ac in (prof.get("live_allowed_asset_classes") or []):
+                    active_asset_classes.add(str(ac).lower())
+                lanes = prof.get("asset_lanes") or {}
+                active_asset_classes.update(str(k).lower() for k in lanes.keys())
+
+        for asset_class in active_asset_classes:
+            primary_source_id: str = ""
+            primary_profile_id: str | None = None
+            policy: dict = {}
+            for pid in active_profile_ids:
+                mdp = _rmp(asset_class, profile_id=pid, runtime_config=runtime_cfg)
+                if mdp.get("bars_primary"):
+                    primary_source_id = str(mdp["bars_primary"])
+                    primary_profile_id = pid
+                    policy = mdp
+                    break
+            if not primary_source_id:
+                primary_source_id = _rmsi(asset_class, runtime_config=runtime_cfg)
+            fallback_ids = [str(x) for x in (policy.get("fallback") or [])]
+            freshness_max_s = policy.get("freshness_max_s")
+
+            # Only compute freshness when primary is a non-TD source with a
+            # policy-defined freshness bound. TD-primary always polls, so no
+            # staleness check is needed.
+            primary_age_s: float | None = None
+            fallback_needed = False
+            fallback_reason: str | None = None
+            if (
+                primary_source_id
+                and primary_source_id != "twelvedata"
+                and freshness_max_s is not None
+            ):
+                try:
+                    with self._vg_db.connect() as conn:
+                        row = conn.execute(
+                            """
+                            SELECT MAX(bar_ts_utc) AS mx
+                            FROM vanguard_bars_1m
+                            WHERE asset_class = ? AND data_source = ?
+                            """,
+                            (asset_class, primary_source_id),
+                        ).fetchone()
+                    last_ts = row[0] if row else None
+                    if last_ts:
+                        try:
+                            parsed = datetime.fromisoformat(
+                                str(last_ts).replace("Z", "+00:00")
+                            )
+                            primary_age_s = (
+                                datetime.now(timezone.utc) - parsed
+                            ).total_seconds()
+                        except ValueError:
+                            primary_age_s = None
+                    if primary_age_s is None or primary_age_s > float(freshness_max_s):
+                        fallback_needed = True
+                        fallback_reason = (
+                            f"{primary_source_id}_stale"
+                            if primary_age_s is not None
+                            else f"{primary_source_id}_no_bars"
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[V1] freshness probe failed asset=%s primary=%s: %s",
+                        asset_class, primary_source_id, exc,
+                    )
+
+            plan[asset_class] = {
+                "primary_source_id": primary_source_id,
+                "primary_profile_id": primary_profile_id,
+                "freshness_max_s": freshness_max_s,
+                "fallback_ids": fallback_ids,
+                "primary_age_s": primary_age_s,
+                "fallback_needed": fallback_needed,
+                "fallback_reason": fallback_reason,
+            }
+
+        return plan
+
     def _run_v1(self, in_scope_symbols: list[str] | None = None) -> dict[str, int]:
         """Ensure latest Stage 1 bars are present from all live data sources.
 
@@ -2426,15 +4981,50 @@ class VanguardOrchestrator:
         timings["mt5_poll"] = time.time() - t
 
         t = time.time()
+        # Market-data hub plan: per-asset routing incl. staleness-aware fallback.
+        # When a lane policy points primary at a non-TD source (metaapi/mt5_local)
+        # and bars are fresh, TD is skipped for that class. When primary is stale
+        # beyond freshness_max_s, TD is re-added to the poll list as explicit
+        # fallback — attribution flows through vanguard_market_data_ingest_runs.
+        active_profile_ids = self._active_profile_ids()
+        v1_source_plan = self._resolve_v1_source_plan(
+            runtime_cfg=get_runtime_config(),
+            active_profile_ids=active_profile_ids,
+        )
+        td_fallback_classes: set[str] = set()
         if self._td_adapter:
             td_symbols_backup = self._td_adapter.symbols
             try:
                 runtime_cfg = get_runtime_config()
+                market_sources_cfg = ((runtime_cfg.get("market_data") or {}).get("sources") or {})
                 td_asset_classes = set()
-                if crypto_session_active and resolve_market_data_source_id("crypto", runtime_config=runtime_cfg) == "twelvedata":
-                    td_asset_classes.add("crypto")
-                if forex_session_active and resolve_market_data_source_id("forex", runtime_config=runtime_cfg) == "twelvedata":
-                    td_asset_classes.add("forex")
+                for asset_class, session_active in (
+                    ("crypto", crypto_session_active),
+                    ("forex", forex_session_active),
+                    ("metal", self._is_polling_asset_enabled("metal")),
+                ):
+                    if not session_active:
+                        continue
+                    primary_source = resolve_market_data_source_id(asset_class, runtime_config=runtime_cfg)
+                    # Gate semantics: TD polls only when primary is TD,
+                    # or when the lane plan says fallback is needed.
+                    plan_entry = v1_source_plan.get(asset_class) or {}
+                    plan_primary = plan_entry.get("primary_source_id") or primary_source
+                    if plan_primary == "twelvedata":
+                        td_asset_classes.add(asset_class)
+                    elif plan_entry.get("fallback_needed"):
+                        fallback_ids = plan_entry.get("fallback_ids") or []
+                        if "twelvedata" in fallback_ids:
+                            td_asset_classes.add(asset_class)
+                            td_fallback_classes.add(asset_class)
+                            logger.warning(
+                                "[V1] TD FALLBACK asset=%s primary=%s reason=%s age_s=%s freshness_max_s=%s",
+                                asset_class,
+                                plan_primary,
+                                plan_entry.get("fallback_reason"),
+                                plan_entry.get("primary_age_s"),
+                                plan_entry.get("freshness_max_s"),
+                            )
                 mt5_missing = {
                     _canonical_symbol(sym)
                     for sym in mt5_details.get("requested_symbols", [])
@@ -2493,6 +5083,43 @@ class VanguardOrchestrator:
                 if self._td_adapter.symbols:
                     td_bars = self._td_adapter.poll_latest_bars()
                     logger.info("[V1] Twelve Data polled: %d bars", td_bars)
+                    # Attribute fallback writes to vanguard_market_data_ingest_runs
+                    # so every row is traceable to (profile, provider, fallback_reason).
+                    if td_fallback_classes and td_bars:
+                        import uuid as _uuid
+                        from vanguard.helpers.clock import iso_utc, now_utc
+                        fb_reasons = ",".join(sorted({
+                            (v1_source_plan.get(ac) or {}).get("fallback_reason") or "unknown"
+                            for ac in td_fallback_classes
+                        }))
+                        try:
+                            self._vg_db.insert_market_data_ingest_run(
+                                run_id=str(_uuid.uuid4()),
+                                profile_id=(active_profile_ids[0] if active_profile_ids else "unknown"),
+                                provider_id="twelvedata",
+                                source_family="twelvedata",
+                                asset_classes=sorted(td_fallback_classes),
+                                timeframe="1m",
+                                started_ts_utc=iso_utc(now_utc()),
+                                finished_ts_utc=iso_utc(now_utc()),
+                                symbols_requested=len(self._td_adapter.symbols),
+                                symbols_ok=len(self._td_adapter.symbols),
+                                symbols_failed=0,
+                                rows_written=int(td_bars or 0),
+                                fallback_used=True,
+                                fallback_reason=fb_reasons,
+                                details={
+                                    "trigger": "v1_td_fallback",
+                                    "fallback_asset_classes": sorted(td_fallback_classes),
+                                    "plan_snapshot": {
+                                        ac: v1_source_plan.get(ac) for ac in td_fallback_classes
+                                    },
+                                },
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "[V1] fallback ingest_run insert failed: %s", exc,
+                            )
             finally:
                 self._td_adapter.symbols = td_symbols_backup
         timings["twelvedata_poll"] = time.time() - t
@@ -2506,6 +5133,15 @@ class VanguardOrchestrator:
         t = time.time()
         health_rows = self._update_source_health()
         timings["source_health"] = time.time() - t
+        self._last_v1_runtime_details = {
+            "source_labels": {
+                "crypto": resolve_market_data_source_id("crypto", runtime_config=runtime_cfg),
+                "forex": resolve_market_data_source_id("forex", runtime_config=runtime_cfg),
+                "metal": resolve_market_data_source_id("metal", runtime_config=runtime_cfg),
+            },
+            "mt5_poll_details": dict(mt5_details),
+            "in_scope_symbols": list(in_scope_symbols or []),
+        }
         logger.info("[V1] timings=%s", {k: round(v, 3) for k, v in timings.items()})
         return {
             "v1_alpaca_bars": alpaca_rest_bars,
@@ -2671,15 +5307,17 @@ class VanguardOrchestrator:
         source_map = {
             "ibkr": ("ibkr",),
             "alpaca": ("alpaca_ws", "alpaca_rest"),
+            "metaapi": ("metaapi",),
             "twelvedata": ("twelvedata",),
         }
+        source_names = tuple(source_map.keys())
         with self._vg_db.connect() as conn:
             recent_rows = conn.execute(
                 """
                 SELECT data_source, asset_class, COUNT(*) AS bars_last_5min,
                        COUNT(DISTINCT symbol) AS symbols_with_recent_bar,
                        MAX(bar_ts_utc) AS last_bar_ts
-                FROM vanguard_bars_1m
+                FROM vanguard_bars_1m INDEXED BY idx_vg_bars_1m_ts_source_asset_symbol
                 WHERE bar_ts_utc >= ?
                 GROUP BY data_source, asset_class
                 """,
@@ -2692,7 +5330,7 @@ class VanguardOrchestrator:
             recent_last_day_rows = conn.execute(
                 """
                 SELECT data_source, asset_class, MAX(bar_ts_utc) AS last_bar_ts
-                FROM vanguard_bars_1m
+                FROM vanguard_bars_1m INDEXED BY idx_vg_bars_1m_ts_source_asset_symbol
                 WHERE bar_ts_utc >= ?
                 GROUP BY data_source, asset_class
                 """,
@@ -2702,27 +5340,30 @@ class VanguardOrchestrator:
                 (row["data_source"], row["asset_class"]): dict(row)
                 for row in recent_last_day_rows
             }
+            placeholders = ",".join("?" for _ in source_names)
+            active_rows = conn.execute(
+                f"""
+                SELECT data_source, asset_class, COUNT(DISTINCT symbol) AS active_count
+                FROM vanguard_universe_members
+                WHERE is_active = 1 AND data_source IN ({placeholders})
+                GROUP BY data_source, asset_class
+                ORDER BY data_source, asset_class
+                """,
+                source_names,
+            ).fetchall()
+            active_stats = {
+                (row["data_source"], row["asset_class"]): int(row["active_count"] or 0)
+                for row in active_rows
+            }
             for source, bar_sources in source_map.items():
-                asset_rows = conn.execute(
-                    """
-                    SELECT DISTINCT asset_class
-                    FROM vanguard_universe_members
-                    WHERE data_source = ? AND is_active = 1
-                    ORDER BY asset_class
-                    """,
-                    (source,),
-                ).fetchall()
-                for asset_row in asset_rows:
-                    asset_class = asset_row[0]
+                asset_classes = sorted(
+                    asset_class
+                    for source_name, asset_class in active_stats
+                    if source_name == source
+                )
+                for asset_class in asset_classes:
                     source_keys = [(bar_source, asset_class) for bar_source in bar_sources]
-                    active_count = conn.execute(
-                        """
-                        SELECT COUNT(DISTINCT symbol)
-                        FROM vanguard_universe_members
-                        WHERE data_source = ? AND asset_class = ? AND is_active = 1
-                        """,
-                        (source, asset_class),
-                    ).fetchone()[0]
+                    active_count = active_stats.get((source, asset_class), 0)
                     recent_symbols = sum(
                         recent_stats.get(key, {}).get("symbols_with_recent_bar", 0)
                         for key in source_keys
@@ -2731,21 +5372,12 @@ class VanguardOrchestrator:
                         recent_stats.get(key, {}).get("bars_last_5min", 0)
                         for key in source_keys
                     )
-                    last_bar_ts = next(
-                        (
-                            recent_stats.get(key, {}).get("last_bar_ts")
-                            or last_day_stats.get(key, {}).get("last_bar_ts")
-                        )
-                        for key in source_keys
-                        if (
-                            recent_stats.get(key, {}).get("last_bar_ts")
-                            or last_day_stats.get(key, {}).get("last_bar_ts")
-                        )
-                    ) if any(
+                    candidate_last_bar_ts = [
                         recent_stats.get(key, {}).get("last_bar_ts")
                         or last_day_stats.get(key, {}).get("last_bar_ts")
                         for key in source_keys
-                    ) else None
+                    ]
+                    last_bar_ts = max((ts for ts in candidate_last_bar_ts if ts), default=None)
                     status = "live" if recent_symbols > 0 else "stale"
                     rows.append({
                         "data_source": source,
@@ -2776,7 +5408,416 @@ class VanguardOrchestrator:
             and ("lgbm_vp45" in model_source or model_source)
         )
 
-    def _execute_approved(self, cycle_ts: str | None = None) -> None:
+    def _emit_nonapproved_cycle_decisions(self, cycle_ts: str | None = None) -> dict[str, int]:
+        """Emit decision-log rows for blocked/held cycles even when nothing reaches execution."""
+        _signal_decision_log_ensure_table(self.db_path)
+        _signal_forward_checkpoints_ensure_table(self.db_path)
+        tradeable_rows = _get_tradeable_rows(self.db_path, cycle_ts)
+        cycle_ts_utc = str(cycle_ts or (tradeable_rows[0].get("cycle_ts_utc") if tradeable_rows else "") or "")
+        if not cycle_ts_utc:
+            return {"meta_gate": 0, "blocked": 0, "held": 0}
+
+        candidate_metrics_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+        selection_blocked_rows: list[dict[str, Any]] = []
+        meta_gate_rows: list[dict[str, Any]] = []
+        try:
+            with sqlite_conn(self.db_path) as con:
+                con.row_factory = sqlite3.Row
+                runtime_cfg = get_runtime_config()
+                decision_streams = runtime_cfg.get("decision_streams") or {}
+                metagate_stream_profiles: dict[str, str] = {}
+                for stream_id, stream_cfg in decision_streams.items():
+                    stream_id = str(stream_id or "")
+                    if not stream_id:
+                        continue
+                    gate_cfg = (stream_cfg or {}).get("meta_gate")
+                    if not isinstance(gate_cfg, dict) or gate_cfg.get("enabled") is False:
+                        continue
+                    profile_id = str((stream_cfg or {}).get("execution_profile_id") or "")
+                    if profile_id:
+                        metagate_stream_profiles[stream_id] = profile_id
+                if metagate_stream_profiles:
+                    placeholders = ",".join("?" for _ in metagate_stream_profiles)
+                    p_cols = self._table_columns(con, "vanguard_predictions_history")
+                    p_model_family = self._optional_col_expr(
+                        p_cols, "p", "model_family", fallback_sql="NULL", out_alias="model_family"
+                    )
+                    p_model_run_id = self._optional_col_expr(
+                        p_cols, "p", "model_run_id", fallback_sql="NULL", out_alias="model_run_id"
+                    )
+                    p_target_horizon_bars = self._optional_col_expr(
+                        p_cols, "p", "target_horizon_bars", fallback_sql="NULL", out_alias="target_horizon_bars"
+                    )
+                    meta_rows = con.execute(
+                        f"""
+                        SELECT p.cycle_ts_utc,
+                               p.symbol,
+                               p.direction,
+                               p.asset_class,
+                               p.lane_id,
+                               p.decision_stream_id,
+                               p.predicted_return,
+                               p.conviction,
+                               p.model_id,
+                               {p_model_run_id},
+                               {p_model_family},
+                               {p_target_horizon_bars},
+                               p.meta_score,
+                               p.meta_pass,
+                               p.meta_gate_id
+                        FROM vanguard_predictions_history p
+                        WHERE p.cycle_ts_utc = ?
+                          AND p.decision_stream_id IN ({placeholders})
+                          AND COALESCE(p.meta_pass, 0) = 0
+                        """,
+                        [cycle_ts_utc, *metagate_stream_profiles.keys()],
+                    ).fetchall()
+                    for row in meta_rows:
+                        row_dict = dict(row)
+                        row_dict["profile_id"] = metagate_stream_profiles.get(str(row["decision_stream_id"] or ""), "")
+                        if row_dict["profile_id"]:
+                            meta_gate_rows.append(row_dict)
+
+                s_cols = self._table_columns(con, "vanguard_v5_selection")
+                t_cols = self._table_columns(con, "vanguard_v5_tradeability")
+                s_live_policy_reason = self._optional_col_expr(
+                    s_cols, "s", "live_policy_reason_json", out_alias="live_policy_reason_json"
+                )
+                t_predicted_move_bps = self._optional_col_expr(
+                    t_cols, "t", "predicted_move_bps", out_alias="predicted_move_bps"
+                )
+                t_spread_bps = self._optional_col_expr(t_cols, "t", "spread_bps", out_alias="spread_bps")
+                t_cost_bps = self._optional_col_expr(t_cols, "t", "cost_bps", out_alias="cost_bps")
+                t_after_cost_bps = self._optional_col_expr(
+                    t_cols, "t", "after_cost_bps", out_alias="after_cost_bps"
+                )
+                t_metrics_json = self._optional_col_expr(
+                    t_cols, "t", "metrics_json", fallback_sql="'{}'", out_alias="metrics_json"
+                )
+                t_conviction = self._optional_col_expr(t_cols, "t", "conviction", out_alias="conviction")
+                t_target_horizon_bars = self._optional_col_expr(
+                    t_cols, "t", "target_horizon_bars", out_alias="target_horizon_bars"
+                )
+                t_model_family = self._optional_col_expr(t_cols, "t", "model_family", out_alias="model_family")
+                t_model_source = self._optional_col_expr(
+                    t_cols, "t", "model_id", fallback_sql="''", out_alias="model_source"
+                )
+                t_model_readiness = self._optional_col_expr(
+                    t_cols, "t", "model_readiness", fallback_sql="''", out_alias="model_readiness"
+                )
+                t_gate_policy = self._optional_col_expr(
+                    t_cols, "t", "gate_policy", fallback_sql="''", out_alias="gate_policy"
+                )
+                t_pair_state_ref_json = self._optional_col_expr(
+                    t_cols, "t", "pair_state_ref_json", fallback_sql="'{}'", out_alias="pair_state_ref_json"
+                )
+                rows = con.execute(
+                    f"""
+                    SELECT s.profile_id,
+                           s.symbol,
+                           s.asset_class,
+                           s.direction,
+                           s.selected,
+                           s.selection_rank,
+                           s.selection_reason,
+                           s.route_tier,
+                           s.selection_state,
+                           {s_live_policy_reason},
+                           s.decision_stream_id,
+                           s.top_rank_streak,
+                           s.strong_prediction_streak,
+                           s.same_bucket_streak,
+                           s.flip_count_window,
+                           s.live_followthrough_pips,
+                           s.live_followthrough_bps,
+                           s.live_followthrough_state,
+                           s.direction_streak,
+                           t.predicted_return,
+                           {t_predicted_move_bps},
+                           {t_spread_bps},
+                           {t_cost_bps},
+                           {t_after_cost_bps},
+                           {t_metrics_json},
+                           {t_conviction},
+                           {t_target_horizon_bars},
+                           {t_model_family},
+                           {t_model_source},
+                           {t_model_readiness},
+                           {t_gate_policy},
+                           {t_pair_state_ref_json}
+                    FROM vanguard_v5_selection s
+                    LEFT JOIN vanguard_v5_tradeability t
+                      ON t.cycle_ts_utc = s.cycle_ts_utc
+                     AND t.profile_id = s.profile_id
+                     AND t.symbol = s.symbol
+                     AND t.direction = s.direction
+                    WHERE s.cycle_ts_utc = ?
+                    """,
+                    (cycle_ts_utc,),
+                ).fetchall()
+                for row in rows:
+                    row_dict = dict(row)
+                    candidate_metrics_map[
+                        (
+                            str(row["profile_id"] or ""),
+                            str(row["symbol"] or "").upper(),
+                            str(row["direction"] or "").upper(),
+                        )
+                    ] = row_dict
+                    if (
+                        not int(row_dict.get("selected") or 0)
+                        and str(row_dict.get("selection_reason") or "") in {
+                            "POCKET_FILTER_REJECT",
+                            "PROFILE_SELECTION_CAP",
+                            "PROFILE_DIRECTION_SELECTION_CAP",
+                            "ASSET_CLASS_SELECTION_CAP",
+                            "BASE_CURRENCY_SELECTION_CAP",
+                            "LIVE_POLICY_FILTER_NOT_MET",
+                        }
+                    ):
+                        selection_blocked_rows.append(row_dict)
+        except Exception as exc:
+            logger.warning("[decision_log] could not load cycle candidate metrics: %s", exc)
+
+        selection_reason_to_decision = {
+            "POCKET_FILTER_REJECT": "SKIPPED_POCKET_FILTER",
+            "PROFILE_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "PROFILE_DIRECTION_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "ASSET_CLASS_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "BASE_CURRENCY_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "LIVE_POLICY_FILTER_NOT_MET": "SKIPPED_POLICY",
+        }
+        context_positions_cache: dict[str, list[dict[str, Any]]] = {}
+        inserted_meta_gate = 0
+        inserted_blocked = 0
+        inserted_held = 0
+
+        def _positions_for_profile(profile_id: str) -> list[dict[str, Any]]:
+            if profile_id not in context_positions_cache:
+                context_positions_cache[profile_id] = self._load_context_positions_snapshot(profile_id)
+            return context_positions_cache.get(profile_id) or []
+
+        for rejected in meta_gate_rows:
+            profile_id = str(rejected.get("profile_id") or "")
+            if not profile_id:
+                continue
+            profile_cfg = self._runtime_profile_by_id(profile_id) or {"id": profile_id}
+            binding = resolve_profile_lane_binding(
+                profile_cfg,
+                str(rejected.get("asset_class") or "forex"),
+                runtime_cfg=self._runtime_config or get_runtime_config(),
+                strict=False,
+                allow_legacy=binding_allows_legacy(
+                    profile_cfg,
+                    str(rejected.get("asset_class") or "forex"),
+                    runtime_cfg=self._runtime_config or get_runtime_config(),
+                ),
+            )
+            positions = _positions_for_profile(profile_id)
+            max_slots = self._get_max_open_positions(profile_id)
+            decision_stream_id = str(rejected.get("decision_stream_id") or "")
+            symbol = str(rejected.get("symbol") or "").upper()
+            direction = str(rejected.get("direction") or "").upper()
+            meta_gate_id = str(rejected.get("meta_gate_id") or "")
+            decision_reason_json = {
+                "source": "meta_gate",
+                "meta_gate_id": meta_gate_id,
+                "meta_score": rejected.get("meta_score"),
+                "meta_pass": 0,
+                "conviction": rejected.get("conviction"),
+            }
+            decision_id = f"meta:{cycle_ts_utc}:{profile_id}:{decision_stream_id}:{symbol}:{direction}"
+            _signal_decision_insert(
+                self.db_path,
+                decision_id=decision_id,
+                cycle_ts_utc=cycle_ts_utc,
+                profile_id=profile_id,
+                symbol=symbol,
+                direction=direction,
+                asset_class=str(rejected.get("asset_class") or "").lower() or None,
+                model_id=str(rejected.get("model_id") or "") or None,
+                model_run_id=rejected.get("model_run_id"),
+                model_family=rejected.get("model_family"),
+                decision_stream_id=decision_stream_id,
+                lane_id=rejected.get("lane_id"),
+                execution_policy_id=binding.get("execution_policy_id"),
+                execution_policy_mode=str(binding.get("execution_mode") or "").lower() or None,
+                model_readiness=binding.get("model_readiness"),
+                gate_policy=binding.get("gate_policy"),
+                predicted_return=rejected.get("predicted_return"),
+                open_positions_count=len(positions),
+                max_slots=max_slots,
+                free_slots=max(max_slots - len(positions), 0) if max_slots > 0 else 0,
+                execution_decision="SKIPPED_META_GATE",
+                decision_reason_code="META_GATE_FAIL",
+                decision_reason_json=decision_reason_json,
+                incumbent_snapshot_json=self._serialize_incumbent_snapshot(positions),
+            )
+            inserted_meta_gate += 1
+
+        for blocked in selection_blocked_rows:
+            profile_id = str(blocked.get("profile_id") or "")
+            if not profile_id:
+                continue
+            positions = _positions_for_profile(profile_id)
+            asset_class = str(blocked.get("asset_class") or "").lower() or None
+            max_slots = self._get_max_open_positions(profile_id)
+            execution_policy_id = None
+            execution_policy_mode = None
+            pair_state_ref = {}
+            try:
+                pair_state_ref = json.loads(str(blocked.get("pair_state_ref_json") or "{}"))
+                if not isinstance(pair_state_ref, dict):
+                    pair_state_ref = {}
+            except Exception:
+                pair_state_ref = {}
+            session_bucket = str(pair_state_ref.get("session_bucket") or "").lower() or None
+            decision_reason_json = {
+                "selection_state": str(blocked.get("selection_state") or ""),
+                "route_tier": str(blocked.get("route_tier") or ""),
+                "source": "v5_selection",
+            }
+            try:
+                live_policy_reason_json = json.loads(str(blocked.get("live_policy_reason_json") or "{}"))
+                if isinstance(live_policy_reason_json, dict) and live_policy_reason_json:
+                    decision_reason_json["live_policy"] = live_policy_reason_json
+            except Exception:
+                pass
+            if str(blocked.get("selection_reason") or "") == "LIVE_POLICY_FILTER_NOT_MET":
+                blocked_policy_runner_cfg = self._load_execution_policy_runner_config(asset_class)
+                blocked_live_policy_id = str(blocked_policy_runner_cfg.get("live_policy_id") or "").strip()
+                if blocked_policy_runner_cfg.get("enabled") and blocked_live_policy_id:
+                    execution_policy_id = blocked_live_policy_id
+                    execution_policy_mode = "live"
+            _signal_decision_insert(
+                self.db_path,
+                cycle_ts_utc=cycle_ts_utc,
+                profile_id=profile_id,
+                execution_policy_id=execution_policy_id,
+                execution_policy_mode=execution_policy_mode,
+                symbol=str(blocked.get("symbol") or "").upper(),
+                direction=str(blocked.get("direction") or "").upper(),
+                asset_class=asset_class,
+                session_bucket=session_bucket,
+                entry_price=None,
+                model_id=str(blocked.get("model_source") or "") or None,
+                model_family=blocked.get("model_family"),
+                decision_stream_id=blocked.get("decision_stream_id"),
+                model_readiness=blocked.get("model_readiness"),
+                gate_policy=blocked.get("gate_policy"),
+                predicted_return=blocked.get("predicted_return"),
+                selection_rank=blocked.get("selection_rank"),
+                direction_streak=blocked.get("direction_streak"),
+                top_rank_streak=blocked.get("top_rank_streak"),
+                strong_prediction_streak=blocked.get("strong_prediction_streak"),
+                same_bucket_streak=blocked.get("same_bucket_streak"),
+                flip_count_window=blocked.get("flip_count_window"),
+                live_followthrough_pips=blocked.get("live_followthrough_pips"),
+                live_followthrough_bps=blocked.get("live_followthrough_bps"),
+                live_followthrough_state=blocked.get("live_followthrough_state"),
+                open_positions_count=len(positions),
+                max_slots=max_slots,
+                free_slots=max(max_slots - len(positions), 0) if max_slots > 0 else 0,
+                execution_decision=selection_reason_to_decision.get(
+                    str(blocked.get("selection_reason") or ""),
+                    "SKIPPED_SELECTION_CAP",
+                ),
+                decision_reason_code=str(blocked.get("selection_reason") or ""),
+                decision_reason_json=decision_reason_json,
+                incumbent_snapshot_json=self._serialize_incumbent_snapshot(positions),
+            )
+            inserted_blocked += 1
+
+        for row in tradeable_rows:
+            if str(row.get("status") or "").upper() == "APPROVED":
+                continue
+            profile_id = str(row.get("account_id") or "")
+            if not profile_id:
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            direction = str(row.get("direction") or "").upper()
+            metrics = candidate_metrics_map.get((profile_id, symbol, direction), {})
+            positions = _positions_for_profile(profile_id)
+            asset_class = str(
+                row.get("asset_class")
+                or metrics.get("asset_class")
+                or "unknown"
+            ).lower() or None
+            max_slots = self._get_max_open_positions(profile_id)
+            reason_json: list[Any]
+            try:
+                parsed = json.loads(str(row.get("v6_reasons_json") or "[]"))
+                if isinstance(parsed, list):
+                    reason_json = parsed
+                elif parsed in (None, ""):
+                    reason_json = []
+                else:
+                    reason_json = [parsed]
+            except Exception:
+                reason_json = []
+            decision_reason_json = {
+                "source": "vanguard_tradeable_portfolio",
+                "status": str(row.get("status") or "").upper(),
+                "route_tier": str(metrics.get("route_tier") or ""),
+                "selection_state": str(metrics.get("selection_state") or ""),
+                "v6_reasons": reason_json,
+            }
+            pair_state_ref = {}
+            try:
+                pair_state_ref = json.loads(str(metrics.get("pair_state_ref_json") or "{}"))
+                if not isinstance(pair_state_ref, dict):
+                    pair_state_ref = {}
+            except Exception:
+                pair_state_ref = {}
+            _signal_decision_insert(
+                self.db_path,
+                cycle_ts_utc=cycle_ts_utc,
+                profile_id=profile_id,
+                symbol=symbol,
+                direction=direction,
+                asset_class=asset_class,
+                session_bucket=str(pair_state_ref.get("session_bucket") or "").lower() or None,
+                entry_price=row.get("entry_price"),
+                model_id=str(row.get("model_source") or metrics.get("model_source") or "") or None,
+                model_family=row.get("model_family") or metrics.get("model_family"),
+                decision_stream_id=row.get("decision_stream_id") or metrics.get("decision_stream_id"),
+                model_readiness=row.get("model_readiness") or metrics.get("model_readiness"),
+                gate_policy=row.get("gate_policy") or metrics.get("gate_policy"),
+                v6_state=row.get("v6_state"),
+                predicted_return=row.get("predicted_return") if row.get("predicted_return") is not None else metrics.get("predicted_return"),
+                edge_score=row.get("edge_score"),
+                selection_rank=metrics.get("selection_rank", row.get("rank")),
+                direction_streak=metrics.get("direction_streak"),
+                top_rank_streak=metrics.get("top_rank_streak"),
+                strong_prediction_streak=metrics.get("strong_prediction_streak"),
+                same_bucket_streak=metrics.get("same_bucket_streak"),
+                flip_count_window=metrics.get("flip_count_window"),
+                live_followthrough_pips=metrics.get("live_followthrough_pips"),
+                live_followthrough_bps=metrics.get("live_followthrough_bps"),
+                live_followthrough_state=metrics.get("live_followthrough_state"),
+                risk_usd=row.get("risk_dollars"),
+                risk_pct=row.get("risk_pct"),
+                lot_size=row.get("shares_or_lots"),
+                open_positions_count=len(positions),
+                max_slots=max_slots,
+                free_slots=max(max_slots - len(positions), 0) if max_slots > 0 else 0,
+                execution_decision="SKIPPED_POLICY",
+                decision_reason_code=str(row.get("rejection_reason") or row.get("status") or "HOLD"),
+                decision_reason_json=decision_reason_json,
+                incumbent_snapshot_json=self._serialize_incumbent_snapshot(positions),
+            )
+            inserted_held += 1
+
+        logger.info(
+            "[decision_log] cycle=%s emitted meta_gate=%d blocked=%d held=%d for non-approved cycle",
+            cycle_ts_utc,
+            inserted_meta_gate,
+            inserted_blocked,
+            inserted_held,
+        )
+        return {"meta_gate": inserted_meta_gate, "blocked": inserted_blocked, "held": inserted_held}
+
+    def _execute_approved(self, cycle_ts: str | None = None) -> dict[str, Any]:
         """
         Execute approved positions from the latest V6 cycle.
 
@@ -2820,6 +5861,7 @@ class VanguardOrchestrator:
             logger.warning("[trade_journal] ensure_table failed: %s", _exc)
 
         _candidate_metrics_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+        _selection_blocked_rows: list[dict[str, Any]] = []
         try:
             _metrics_cycle = str(approved[0].get("cycle_ts_utc") or cycle_ts or "")
             if _metrics_cycle:
@@ -2831,7 +5873,24 @@ class VanguardOrchestrator:
                                s.symbol,
                                s.direction,
                                s.selection_rank,
-                               t.predicted_return
+                               s.global_cycle_rank_abs_pred,
+                               s.decision_stream_id,
+                               t.predicted_return,
+                               t.predicted_move_bps,
+                               t.spread_bps,
+                               t.cost_bps,
+                               t.after_cost_bps,
+                               t.metrics_json,
+                               t.conviction,
+                               s.strong_prediction_streak,
+                               s.same_bucket_streak,
+                               s.top_rank_streak,
+                               s.flip_count_window,
+                               s.live_followthrough_pips,
+                               s.live_followthrough_bps,
+                               s.live_followthrough_state,
+                               t.target_horizon_bars,
+                               s.direction_streak
                         FROM vanguard_v5_selection s
                         LEFT JOIN vanguard_v5_tradeability t
                           ON t.cycle_ts_utc = s.cycle_ts_utc
@@ -2849,10 +5908,61 @@ class VanguardOrchestrator:
                             str(_row["direction"] or "").upper(),
                         ): {
                             "selection_rank": _row["selection_rank"],
+                            "global_cycle_rank_abs_pred": _row["global_cycle_rank_abs_pred"],
+                            "decision_stream_id": _row["decision_stream_id"],
                             "predicted_return": _row["predicted_return"],
+                            "predicted_move_bps": _row["predicted_move_bps"],
+                            "spread_bps": _row["spread_bps"],
+                            "cost_bps": _row["cost_bps"],
+                            "after_cost_bps": _row["after_cost_bps"],
+                            "metrics_json": _row["metrics_json"],
+                            "conviction": _row["conviction"],
+                            "strong_prediction_streak": _row["strong_prediction_streak"],
+                            "same_bucket_streak": _row["same_bucket_streak"],
+                            "top_rank_streak": _row["top_rank_streak"],
+                            "flip_count_window": _row["flip_count_window"],
+                            "live_followthrough_pips": _row["live_followthrough_pips"],
+                            "live_followthrough_bps": _row["live_followthrough_bps"],
+                            "live_followthrough_state": _row["live_followthrough_state"],
+                            "target_horizon_bars": _row["target_horizon_bars"],
+                            "direction_streak": _row["direction_streak"],
                         }
                         for _row in _mrows
                     }
+                    _blocked_rows = _mcon.execute(
+                        """
+                        SELECT s.cycle_ts_utc,
+                               s.profile_id,
+                               s.symbol,
+                               s.asset_class,
+                               s.direction,
+                               s.selection_rank,
+                               s.selection_reason,
+                               s.route_tier,
+                               s.selection_state,
+                               s.live_policy_reason_json,
+                               t.predicted_return,
+                               t.pair_state_ref_json
+                        FROM vanguard_v5_selection s
+                        LEFT JOIN vanguard_v5_tradeability t
+                          ON t.cycle_ts_utc = s.cycle_ts_utc
+                         AND t.profile_id = s.profile_id
+                         AND t.symbol = s.symbol
+                         AND t.direction = s.direction
+                        WHERE s.cycle_ts_utc = ?
+                          AND COALESCE(s.selected, 0) = 0
+                          AND COALESCE(s.selection_reason, '') IN (
+                              'POCKET_FILTER_REJECT',
+                              'PROFILE_SELECTION_CAP',
+                              'PROFILE_DIRECTION_SELECTION_CAP',
+                              'ASSET_CLASS_SELECTION_CAP',
+                              'BASE_CURRENCY_SELECTION_CAP',
+                              'LIVE_POLICY_FILTER_NOT_MET'
+                          )
+                        """,
+                        (_metrics_cycle,),
+                    ).fetchall()
+                    _selection_blocked_rows = [dict(_row) for _row in _blocked_rows]
         except Exception as _exc:
             logger.debug("Could not load v5 candidate metrics: %s", _exc)
 
@@ -2862,14 +5972,173 @@ class VanguardOrchestrator:
         forward   = 0
         checkpoint_trade_ids: list[str] = []
         checkpoint_decision_ids: list[str] = []
+        cycle_policy_summary: dict[str, Any] = {
+            "cycle_ts": str(cycle_ts or approved[0].get("cycle_ts_utc") or ""),
+            "live": {
+                "policy_id": "",
+                "approved": 0,
+                "executed": 0,
+                "filled": 0,
+                "failed": 0,
+                "forward_tracked": 0,
+                "rejected": 0,
+            },
+            "shadow": {},
+        }
         metaapi_executor_cls = None
         metaapi_symbol_fn = None
+        metaapi_symbol_same_fn = None
         metaapi_executors: dict[str, Any] = {}
         gft_execution_state: dict[str, dict[str, Any]] = {}
+        metaapi_execution_state: dict[str, dict[str, Any]] = {}
         gft_manual_rows: list[dict[str, Any]] = []
         failure_reasons: Counter[str] = Counter()
         context_positions_cache: dict[str, list[dict[str, Any]]] = {}
+        _selection_reason_to_decision = {
+            "POCKET_FILTER_REJECT": "SKIPPED_POCKET_FILTER",
+            "PROFILE_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "PROFILE_DIRECTION_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "ASSET_CLASS_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "BASE_CURRENCY_SELECTION_CAP": "SKIPPED_SELECTION_CAP",
+            "LIVE_POLICY_FILTER_NOT_MET": "SKIPPED_POLICY",
+        }
+
+        for _blocked in _selection_blocked_rows:
+            _profile_id = str(_blocked.get("profile_id") or "")
+            if not _profile_id:
+                continue
+            if _profile_id not in context_positions_cache:
+                context_positions_cache[_profile_id] = self._load_context_positions_snapshot(_profile_id)
+            _positions = context_positions_cache.get(_profile_id) or []
+            _asset_class = str(_blocked.get("asset_class") or "").lower() or None
+            if _profile_id.lower().startswith("gft_") and str((self._account_profiles.get(_profile_id) or {}).get("execution_bridge") or "").lower() == "mt5":
+                _max_slots = 3
+            else:
+                _max_slots = self._get_max_open_positions(_profile_id)
+            _pair_state_ref = {}
+            try:
+                _pair_state_ref = json.loads(str(_blocked.get("pair_state_ref_json") or "{}"))
+                if not isinstance(_pair_state_ref, dict):
+                    _pair_state_ref = {}
+            except Exception:
+                _pair_state_ref = {}
+            _session_bucket = str(_pair_state_ref.get("session_bucket") or "").lower() or None
+            _candidate_metrics = _candidate_metrics_map.get(
+                (
+                    _profile_id,
+                    str(_blocked.get("symbol") or "").upper(),
+                    str(_blocked.get("direction") or "").upper(),
+                ),
+                {},
+            )
+            _execution_policy_id: str | None = None
+            _execution_policy_mode: str | None = None
+            _metrics_payload = _candidate_metrics.get("metrics_json") or {}
+            if not isinstance(_metrics_payload, dict):
+                try:
+                    _metrics_payload = json.loads(str(_metrics_payload or "{}"))
+                    if not isinstance(_metrics_payload, dict):
+                        _metrics_payload = {}
+                except Exception:
+                    _metrics_payload = {}
+            _blocked_entry_price = _blocked.get("entry_price")
+            if _blocked_entry_price in (None, ""):
+                _blocked_entry_price = _candidate_metrics.get("entry_price")
+            if _blocked_entry_price in (None, ""):
+                _blocked_entry_price = _metrics_payload.get("live_mid")
+            _decision_reason_json = {
+                "selection_state": str(_blocked.get("selection_state") or ""),
+                "route_tier": str(_blocked.get("route_tier") or ""),
+                "source": "v5_selection",
+            }
+            try:
+                _live_policy_reason_json = json.loads(str(_blocked.get("live_policy_reason_json") or "{}"))
+                if isinstance(_live_policy_reason_json, dict) and _live_policy_reason_json:
+                    _decision_reason_json["live_policy"] = _live_policy_reason_json
+            except Exception:
+                pass
+            _blocked_policy_runner_cfg = self._load_execution_policy_runner_config(_asset_class)
+            _blocked_live_policy_id = str(_blocked_policy_runner_cfg.get("live_policy_id") or "").strip()
+            if _blocked_policy_runner_cfg.get("enabled") and _blocked_live_policy_id:
+                _blocked_live_policy_spec = ((_blocked_policy_runner_cfg.get("policies") or {}).get(_blocked_live_policy_id) or {})
+                _blocked_policy_result = self._evaluate_execution_policy(
+                    _blocked_live_policy_id,
+                    _blocked_live_policy_spec,
+                    row=_blocked,
+                    asset_class=_asset_class,
+                    direction=str(_blocked.get("direction") or "").upper(),
+                    session_bucket=_session_bucket,
+                    candidate_metrics=_candidate_metrics,
+                )
+                if bool(_blocked_policy_result.get("approved")):
+                    _execution_policy_id = _blocked_live_policy_id
+                    _execution_policy_mode = "live"
+                    _decision_reason_json = {
+                        **(_blocked_policy_result.get("reason_json") or {}),
+                        **_decision_reason_json,
+                        "policy_id": _blocked_live_policy_id,
+                    }
+                elif str(_blocked.get("selection_reason") or "") == "LIVE_POLICY_FILTER_NOT_MET":
+                    _execution_policy_id = _blocked_live_policy_id
+                    _execution_policy_mode = "live"
+                    _decision_reason_json = {
+                        **_decision_reason_json,
+                        "policy_id": _blocked_live_policy_id,
+                    }
+            _decision_id = _signal_decision_insert(
+                self.db_path,
+                cycle_ts_utc=str(_blocked.get("cycle_ts_utc") or _metrics_cycle or cycle_ts or ""),
+                profile_id=_profile_id,
+                execution_policy_id=_execution_policy_id,
+                execution_policy_mode=_execution_policy_mode,
+                symbol=str(_blocked.get("symbol") or "").upper(),
+                direction=str(_blocked.get("direction") or "").upper(),
+                asset_class=_asset_class,
+                session_bucket=_session_bucket,
+                entry_price=float(_blocked_entry_price) if _blocked_entry_price not in (None, "") else None,
+                model_id=_candidate_metrics.get("model_id"),
+                model_family=_candidate_metrics.get("model_family"),
+                decision_stream_id=_candidate_metrics.get("decision_stream_id"),
+                predicted_return=_candidate_metrics.get("predicted_return", _blocked.get("predicted_return")),
+                selection_rank=_blocked.get("selection_rank"),
+                direction_streak=_candidate_metrics.get("direction_streak"),
+                top_rank_streak=_candidate_metrics.get("top_rank_streak"),
+                strong_prediction_streak=_candidate_metrics.get("strong_prediction_streak"),
+                same_bucket_streak=_candidate_metrics.get("same_bucket_streak"),
+                flip_count_window=_candidate_metrics.get("flip_count_window"),
+                live_followthrough_pips=_candidate_metrics.get("live_followthrough_pips"),
+                live_followthrough_bps=_candidate_metrics.get("live_followthrough_bps"),
+                live_followthrough_state=_candidate_metrics.get("live_followthrough_state"),
+                open_positions_count=len(_positions),
+                max_slots=_max_slots,
+                free_slots=max(_max_slots - len(_positions), 0) if _max_slots > 0 else 0,
+                execution_decision=_selection_reason_to_decision.get(
+                    str(_blocked.get("selection_reason") or ""),
+                    "SKIPPED_SELECTION_CAP",
+                ),
+                decision_reason_code=str(_blocked.get("selection_reason") or ""),
+                decision_reason_json=_decision_reason_json,
+                incumbent_snapshot_json=self._serialize_incumbent_snapshot(_positions),
+            )
+            checkpoint_decision_ids.append(_decision_id)
         gft_time_exit_rows = self._execute_gft_time_exits()
+        throughput_cfg = self._load_throughput_control_config()
+        cost_routing_cfg = self._load_cost_aware_routing_config()
+        cycle_live_routes_taken = 0
+        approved = sorted(
+            approved,
+            key=lambda _row: self._candidate_priority_sort_key(
+                _row,
+                _candidate_metrics_map.get(
+                    (
+                        str(_row.get("account_id") or ""),
+                        str(_row.get("symbol") or "").upper(),
+                        str(_row.get("direction") or "").upper(),
+                    ),
+                    {},
+                ),
+            ),
+        )
         for row in gft_time_exit_rows:
             status = str(row.get("status") or "").upper()
             if status == "FILLED":
@@ -2886,9 +6155,11 @@ class VanguardOrchestrator:
             _acct_profile = self._get_account_profile(account) or {}
             _execution_bridge = str(_acct_profile.get("execution_bridge") or "").lower()
             raw_shares = row.get("shares_or_lots") or 0
+            _fractional_lot_asset = str(row.get("asset_class") or "").lower().strip() != "equity"
             shares = (
                 float(raw_shares)
-                if str(account or "").lower().startswith("gft_")
+                if _fractional_lot_asset
+                or str(account or "").lower().startswith("gft_")
                 or "/" in str(symbol or "")
                 or _execution_bridge.startswith("mt5_local")
                 else int(raw_shares)
@@ -2915,9 +6186,35 @@ class VanguardOrchestrator:
                 (str(account or ""), str(symbol or "").upper(), str(direction or "").upper()),
                 {},
             )
+            _profile_lane = self._profile_lane_for_asset(_acct_profile, _asset_class)
             candidate_stop_pips = self._price_delta_to_pips(symbol, entry_px, stop_loss)
             candidate_tp_pips = self._price_delta_to_pips(symbol, entry_px, take_profit)
             _skip_legacy_forward_track = self._is_model_v2_forex_row(row, _asset_class)
+            policy_runner_cfg = self._load_execution_policy_runner_config(_asset_class)
+            live_execution_policy_id = ""
+            live_execution_policy_mode: str | None = None
+
+            def _record_active_signal_decision(
+                *,
+                execution_decision: str,
+                decision_reason_code: str,
+                decision_reason_json: dict[str, Any] | None = None,
+                positions: list[dict[str, Any]] | None = None,
+                trade_id: str | None = None,
+                broker_position_id: str | None = None,
+                execution_request_id: str | None = None,
+            ) -> str:
+                return _record_signal_decision(
+                    execution_decision=execution_decision,
+                    decision_reason_code=decision_reason_code,
+                    decision_reason_json=decision_reason_json,
+                    execution_policy_id=live_execution_policy_id or None,
+                    execution_policy_mode=live_execution_policy_mode,
+                    positions=positions,
+                    trade_id=trade_id,
+                    broker_position_id=broker_position_id,
+                    execution_request_id=execution_request_id,
+                )
 
             def _positions_for_decision(positions: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
                 if positions is not None:
@@ -2931,11 +6228,15 @@ class VanguardOrchestrator:
                 execution_decision: str,
                 decision_reason_code: str,
                 decision_reason_json: dict[str, Any] | None = None,
+                execution_policy_id: str | None = None,
+                execution_policy_mode: str | None = None,
                 positions: list[dict[str, Any]] | None = None,
                 trade_id: str | None = None,
                 broker_position_id: str | None = None,
                 execution_request_id: str | None = None,
             ) -> str:
+                if self._is_test_execution_mode():
+                    return ""
                 incumbent_positions = _positions_for_decision(positions)
                 if account.lower().startswith("gft_") and str((_acct_profile or {}).get("execution_bridge") or "").lower() == "mt5":
                     max_slots = 3
@@ -2947,6 +6248,8 @@ class VanguardOrchestrator:
                     self.db_path,
                     cycle_ts_utc=str(row.get("cycle_ts_utc") or cycle_ts or ""),
                     profile_id=str(account or ""),
+                    execution_policy_id=execution_policy_id,
+                    execution_policy_mode=execution_policy_mode,
                     trade_id=trade_id,
                     broker_position_id=broker_position_id,
                     execution_request_id=execution_request_id,
@@ -2956,13 +6259,25 @@ class VanguardOrchestrator:
                     session_bucket=session_bucket,
                     entry_price=float(entry_px or 0.0) if entry_px not in (None, "") else None,
                     model_id=str(row.get("model_source") or "") or None,
-                    model_family=_infer_model_family(row.get("model_source")),
+                    model_family=row.get("model_family") or _infer_model_family(row.get("model_source")),
+                    decision_stream_id=(
+                        candidate_metrics.get("decision_stream_id")
+                        or row.get("decision_stream_id")
+                    ),
                     model_readiness=str(row.get("model_readiness") or "") or None,
                     gate_policy=str(row.get("gate_policy") or "") or None,
                     v6_state=str(row.get("v6_state") or "") or None,
                     predicted_return=candidate_metrics.get("predicted_return"),
                     edge_score=row.get("edge_score"),
                     selection_rank=candidate_metrics.get("selection_rank", row.get("rank")),
+                    direction_streak=candidate_metrics.get("direction_streak", row.get("direction_streak")),
+                    top_rank_streak=candidate_metrics.get("top_rank_streak", row.get("top_rank_streak")),
+                    strong_prediction_streak=candidate_metrics.get("strong_prediction_streak", row.get("strong_prediction_streak")),
+                    same_bucket_streak=candidate_metrics.get("same_bucket_streak", row.get("same_bucket_streak")),
+                    flip_count_window=candidate_metrics.get("flip_count_window", row.get("flip_count_window")),
+                    live_followthrough_pips=candidate_metrics.get("live_followthrough_pips", row.get("live_followthrough_pips")),
+                    live_followthrough_bps=candidate_metrics.get("live_followthrough_bps", row.get("live_followthrough_bps")),
+                    live_followthrough_state=candidate_metrics.get("live_followthrough_state", row.get("live_followthrough_state")),
                     risk_usd=row.get("risk_dollars"),
                     risk_pct=row.get("risk_pct"),
                     lot_size=float(shares or 0.0),
@@ -2981,16 +6296,134 @@ class VanguardOrchestrator:
                 checkpoint_decision_ids.append(decision_id)
                 return decision_id
 
-            if shares <= 0:
-                logger.warning("Skipping %s — shares=%s", symbol, shares)
-                continue
+            def _record_execution_attempt_fact(
+                *,
+                attempt_status: str,
+                reason_code: str | None = None,
+                response_json: dict[str, Any] | None = None,
+                broker_order_id: str | None = None,
+                broker_position_id: str | None = None,
+                execution_bridge: str | None = None,
+                trade_id: str | None = None,
+            ) -> None:
+                if self._is_test_execution_mode():
+                    return
+                _write_execution_attempt(
+                    cycle_ts_utc=str(row.get("cycle_ts_utc") or cycle_ts or ""),
+                    profile_id=str(account or ""),
+                    decision_stream_id=str(
+                        candidate_metrics.get("decision_stream_id")
+                        or row.get("decision_stream_id")
+                        or ""
+                    ),
+                    trade_id=trade_id or _trade_id,
+                    symbol=str(symbol or "").upper(),
+                    direction=str(direction or "").upper(),
+                    execution_mode=self.execution_mode,
+                    execution_bridge=str(
+                        execution_bridge
+                        or _execution_bridge
+                        or (_acct_profile or {}).get("execution_bridge")
+                        or "disabled"
+                    ).lower(),
+                    attempt_status=attempt_status,
+                    reason_code=reason_code,
+                    broker_order_id=broker_order_id,
+                    broker_position_id=broker_position_id,
+                    response_json=response_json or {},
+                    db_path=self.db_path,
+                )
+
+            _trade_id: Optional[str] = None
+            if policy_runner_cfg.get("enabled"):
+                available_policies = dict(policy_runner_cfg.get("policies") or {})
+                _preferred_live_policy_id = str(
+                    _profile_lane.get("execution_policy_id")
+                    or row.get("execution_policy_id")
+                    or ""
+                ).strip()
+                _runner_live_policy_id = str(policy_runner_cfg.get("live_policy_id") or "").strip()
+                if _preferred_live_policy_id and _preferred_live_policy_id in available_policies:
+                    live_execution_policy_id = _preferred_live_policy_id
+                else:
+                    live_execution_policy_id = _runner_live_policy_id or live_execution_policy_id
+                live_execution_policy_mode = "live"
+                if live_execution_policy_id:
+                    _summary_policy_id = str(cycle_policy_summary["live"].get("policy_id") or "").strip()
+                    if _summary_policy_id and _summary_policy_id != live_execution_policy_id:
+                        cycle_policy_summary["live"]["policy_id"] = "mixed"
+                    else:
+                        cycle_policy_summary["live"]["policy_id"] = live_execution_policy_id
+                for shadow_policy_id in policy_runner_cfg.get("shadow_policy_ids") or []:
+                    cycle_policy_summary["shadow"].setdefault(
+                        str(shadow_policy_id),
+                        {"approved": 0, "rejected": 0},
+                    )
+                policy_results: dict[str, dict[str, Any]] = {}
+                policy_order = list(policy_runner_cfg.get("policy_order") or [])
+                if live_execution_policy_id and live_execution_policy_id in available_policies and live_execution_policy_id not in policy_order:
+                    policy_order.insert(0, live_execution_policy_id)
+                for policy_id in policy_order:
+                    policy_spec = available_policies.get(policy_id) or {}
+                    mode = str(policy_spec.get("mode") or ("live" if policy_id == live_execution_policy_id else "shadow")).lower()
+                    policy_result = self._evaluate_execution_policy(
+                        policy_id,
+                        policy_spec,
+                        row=row,
+                        asset_class=_asset_class,
+                        direction=direction,
+                        session_bucket=session_bucket,
+                        candidate_metrics=candidate_metrics,
+                    )
+                    policy_result["mode"] = mode
+                    policy_result["reason_json"] = {
+                        **(policy_result.get("reason_json") or {}),
+                        "policy_id": policy_id,
+                    }
+                    policy_results[policy_id] = policy_result
+                    if mode == "shadow":
+                        bucket = cycle_policy_summary["shadow"].setdefault(
+                            str(policy_id),
+                            {"approved": 0, "rejected": 0},
+                        )
+                        bucket["approved" if policy_result.get("approved") else "rejected"] += 1
+                        _record_signal_decision(
+                            execution_decision="SHADOW_APPROVED" if policy_result.get("approved") else "SHADOW_REJECTED",
+                            decision_reason_code=str(policy_result.get("reason_code") or "POLICY_UNKNOWN"),
+                            decision_reason_json=policy_result.get("reason_json") or {},
+                            execution_policy_id=str(policy_id),
+                            execution_policy_mode="shadow",
+                        )
+                live_policy_result = policy_results.get(live_execution_policy_id)
+                if not live_policy_result:
+                    live_policy_result = {
+                        "approved": True,
+                        "reason_code": "POLICY_RUNNER_BYPASS",
+                        "reason_json": {"policy_id": live_execution_policy_id},
+                    }
+                if not bool(live_policy_result.get("approved")):
+                    cycle_policy_summary["live"]["rejected"] += 1
+                    _record_signal_decision(
+                        execution_decision="SKIPPED_POLICY",
+                        decision_reason_code=str(live_policy_result.get("reason_code") or "POLICY_FILTER_NOT_MET"),
+                        decision_reason_json=live_policy_result.get("reason_json") or {},
+                        execution_policy_id=live_execution_policy_id or None,
+                        execution_policy_mode="live",
+                    )
+                    _record_execution_attempt_fact(
+                        attempt_status="SKIPPED_POLICY",
+                        reason_code=str(live_policy_result.get("reason_code") or "POLICY_FILTER_NOT_MET"),
+                        response_json=live_policy_result.get("reason_json") or {},
+                    )
+                    continue
+                cycle_policy_summary["live"]["approved"] += 1
 
             if (
                 not self._is_manual_execution_mode()
                 and self.execution_mode == "live"
                 and self._scheduled_flatten_window_active(str(account or ""))
             ):
-                _record_signal_decision(
+                _record_active_signal_decision(
                     execution_decision="SKIPPED_POLICY",
                     decision_reason_code="SCHEDULED_FLATTEN_WINDOW",
                     decision_reason_json={
@@ -2999,8 +6432,9 @@ class VanguardOrchestrator:
                         "window_active": True,
                     },
                 )
+                cycle_policy_summary["live"]["forward_tracked"] += 1
                 forward += 1
-                _notes = "live routing disabled during scheduled flatten window"
+                _notes = self._scheduled_flatten_window_note(str(account or "")) or "Intentional liquidity guard: live routing disabled during scheduled flatten window"
                 if not _skip_legacy_forward_track:
                     _write_execution_row(
                         symbol=symbol,
@@ -3025,10 +6459,19 @@ class VanguardOrchestrator:
                         db_path=self.db_path,
                     )
                 logger.info(
-                    "[SCHEDULED FLATTEN WINDOW] %s %s skipped — live routing paused for account=%s",
+                    "[SCHEDULED FLATTEN WINDOW] %s %s skipped — intentional liquidity guard active for account=%s",
                     symbol,
                     direction,
                     account,
+                )
+                _record_execution_attempt_fact(
+                    attempt_status="FORWARD_TRACKED",
+                    reason_code="SCHEDULED_FLATTEN_WINDOW",
+                    response_json={
+                        "reason": "scheduled_flatten_window",
+                        "execution_mode": self.execution_mode,
+                        "window_active": True,
+                    },
                 )
                 continue
 
@@ -3036,7 +6479,7 @@ class VanguardOrchestrator:
             # Construct candidate and policy_decision dicts from the approved row.
             # asset_class is looked up from vanguard_shortlist; falls back to inference.
             if not self._is_manual_execution_mode() and not self._is_live_routing_asset_allowed(_asset_class, str(account or "")):
-                _record_signal_decision(
+                _record_active_signal_decision(
                     execution_decision="SKIPPED_POLICY",
                     decision_reason_code="LIVE_ASSET_DISABLED",
                     decision_reason_json={
@@ -3045,6 +6488,7 @@ class VanguardOrchestrator:
                         "execution_mode": self.execution_mode,
                     },
                 )
+                cycle_policy_summary["live"]["forward_tracked"] += 1
                 forward += 1
                 _notes = f"live routing disabled for asset_class={_asset_class}"
                 if not _skip_legacy_forward_track:
@@ -3072,18 +6516,151 @@ class VanguardOrchestrator:
                         db_path=self.db_path,
                     )
                 logger.info("[LIVE GATE] %s %s skipped — asset_class=%s disabled for live routing", symbol, direction, _asset_class)
+                _record_execution_attempt_fact(
+                    attempt_status="FORWARD_TRACKED",
+                    reason_code="LIVE_ASSET_DISABLED",
+                    response_json={
+                        "reason": "live_asset_disabled",
+                        "asset_class": _asset_class,
+                        "execution_mode": self.execution_mode,
+                    },
+                )
                 continue
+            # Global manual/test mode always wins. Profiles may only downgrade live routing,
+            # not silently override a manual run into live execution.
+            _profile_mode = self._profile_execution_mode_for_asset(_acct_profile, _asset_class)
+            _profile_auto = _profile_mode == "auto"
+            _effective_manual = (
+                self._is_manual_execution_mode()
+                or (_profile_mode in {"manual", "off", "paper"})
+                or not _profile_auto
+            )
+            if not self._is_manual_execution_mode() and not _effective_manual:
+                _cost_routing_state = self._candidate_cost_routing_state(
+                    row,
+                    candidate_metrics,
+                    cost_routing_cfg,
+                )
+                if cost_routing_cfg.get("enabled") and not bool(_cost_routing_state.get("passes")):
+                    cycle_policy_summary["live"]["rejected"] += 1
+                    _record_active_signal_decision(
+                        execution_decision="SKIPPED_COST_ROUTING",
+                        decision_reason_code=str(_cost_routing_state.get("reason_code") or "COST_ROUTING_REJECTED"),
+                        decision_reason_json=dict(_cost_routing_state.get("reason_json") or {}),
+                    )
+                    logger.info(
+                        "[COST ROUTING] %s %s skipped — reason=%s",
+                        symbol,
+                        direction,
+                        _cost_routing_state.get("reason_code") or "COST_ROUTING_REJECTED",
+                    )
+                    _record_execution_attempt_fact(
+                        attempt_status="SKIPPED_COST_ROUTING",
+                        reason_code=str(_cost_routing_state.get("reason_code") or "COST_ROUTING_REJECTED"),
+                        response_json=dict(_cost_routing_state.get("reason_json") or {}),
+                    )
+                    continue
+                _ban_rule = self._match_tactical_ban(
+                    asset_class=_asset_class,
+                    symbol=symbol,
+                    direction=direction,
+                )
+                if _ban_rule:
+                    cycle_policy_summary["live"]["rejected"] += 1
+                    _record_active_signal_decision(
+                        execution_decision="SKIPPED_TACTICAL_BAN",
+                        decision_reason_code="TACTICAL_BAN",
+                        decision_reason_json={
+                            "reason": str(_ban_rule.get("reason") or "tactical_ban"),
+                            "symbol": str(_ban_rule.get("symbol") or symbol),
+                            "side": str(_ban_rule.get("side") or direction),
+                            "asset_class": _asset_class,
+                        },
+                    )
+                    logger.info(
+                        "[TACTICAL BAN] %s %s skipped — reason=%s",
+                        symbol,
+                        direction,
+                        _ban_rule.get("reason") or "tactical_ban",
+                    )
+                    _record_execution_attempt_fact(
+                        attempt_status="SKIPPED_TACTICAL_BAN",
+                        reason_code="TACTICAL_BAN",
+                        response_json={
+                            "reason": str(_ban_rule.get("reason") or "tactical_ban"),
+                            "symbol": str(_ban_rule.get("symbol") or symbol),
+                            "side": str(_ban_rule.get("side") or direction),
+                            "asset_class": _asset_class,
+                        },
+                    )
+                    continue
+                if throughput_cfg.get("enabled"):
+                    _allow = cycle_live_routes_taken < int(throughput_cfg.get("default_max_new_entries_per_cycle") or 1)
+                    if not _allow and cycle_live_routes_taken == int(throughput_cfg.get("default_max_new_entries_per_cycle") or 1):
+                        _allow = self._candidate_allows_second_entry(
+                            row,
+                            candidate_metrics,
+                            throughput_cfg,
+                        )
+                    if not _allow:
+                        cycle_policy_summary["live"]["rejected"] += 1
+                        _record_active_signal_decision(
+                            execution_decision="SKIPPED_THROUGHPUT_PRIORITY",
+                            decision_reason_code="THROUGHPUT_LIMIT",
+                            decision_reason_json={
+                                "routing_limit": self._throughput_mode_summary(),
+                                "routes_taken_this_cycle": cycle_live_routes_taken,
+                                "directional_conviction": self._directional_conviction_strength(direction, candidate_metrics.get("conviction", row.get("conviction"))),
+                                "top_rank_streak": int(candidate_metrics.get("top_rank_streak") or 0),
+                            },
+                        )
+                        logger.info(
+                            "[THROUGHPUT LIMIT] %s %s skipped — routes_taken=%d mode=%s",
+                            symbol,
+                            direction,
+                            cycle_live_routes_taken,
+                            self._throughput_mode_summary(),
+                        )
+                        _record_execution_attempt_fact(
+                            attempt_status="SKIPPED_THROUGHPUT_PRIORITY",
+                            reason_code="THROUGHPUT_LIMIT",
+                            response_json={
+                                "routing_limit": self._throughput_mode_summary(),
+                                "routes_taken_this_cycle": cycle_live_routes_taken,
+                                "directional_conviction": self._directional_conviction_strength(direction, candidate_metrics.get("conviction", row.get("conviction"))),
+                                "top_rank_streak": int(candidate_metrics.get("top_rank_streak") or 0),
+                            },
+                        )
+                        continue
+                    cycle_live_routes_taken += 1
+            _lifecycle_policy_id = self._lifecycle_policy_id_for_candidate(
+                _asset_class,
+                direction,
+                session_bucket,
+            )
+            if not live_execution_policy_id:
+                live_execution_policy_id = str(_lifecycle_policy_id or "")
             _candidate = {
                 "symbol":        symbol,
                 "asset_class":   _asset_class,
                 "side":          direction,
-                "policy_id":     str(row.get("policy_id") or (_acct_profile or {}).get("policy_id") or "") or None,
+                "policy_id":     live_execution_policy_id or _lifecycle_policy_id,
+                "decision_stream_id": row.get("decision_stream_id"),
                 "entry_price":   entry_px,
                 "stop_price":    stop_loss,
                 "tp_price":      take_profit,
                 "shares_or_lots": shares,
                 "model_id":      row.get("model_source"),
-                "model_family":  _infer_model_family(row.get("model_source")),
+                "model_family":  row.get("model_family") or _infer_model_family(row.get("model_source")),
+                "conviction":    row.get("conviction"),
+                "target_horizon_bars": row.get("target_horizon_bars"),
+                "spread_pips":   row.get("spread_pips"),
+                "spread_bps":    row.get("spread_bps"),
+                "spread_pct":    (
+                    float(row.get("spread_bps")) / 100.0
+                    if row.get("spread_bps") not in (None, "")
+                    else None
+                ),
                 "original_entry_ref_price": entry_px,
                 "original_stop_price": stop_loss,
                 "original_tp_price": take_profit,
@@ -3115,7 +6692,8 @@ class VanguardOrchestrator:
             _policy_decision = {
                 "decision":       "APPROVED",
                 "reject_reason":  None,
-                "policy_id":      str(row.get("policy_id") or (_acct_profile or {}).get("policy_id") or "") or None,
+                "policy_id":      live_execution_policy_id or _lifecycle_policy_id,
+                "lifecycle_policy_id": _lifecycle_policy_id,
                 "approved_qty":   shares,
                 "approved_sl":    stop_loss,
                 "approved_tp":    take_profit,
@@ -3127,76 +6705,94 @@ class VanguardOrchestrator:
                 "model_readiness": row.get("model_readiness"),
                 "model_source":   row.get("model_source"),
                 "model_id":       row.get("model_source"),
-                "model_family":   _infer_model_family(row.get("model_source")),
+                "model_family":   row.get("model_family") or _infer_model_family(row.get("model_source")),
+                "decision_stream_id": row.get("decision_stream_id"),
+                "conviction":     row.get("conviction"),
+                "target_horizon_bars": row.get("target_horizon_bars"),
                 "risk_pct":       row.get("risk_pct"),
             }
             _cycle_ts = str(row.get("cycle_ts_utc") or "")
-            # Global manual/test mode always wins. Profiles may only downgrade live routing,
-            # not silently override a manual run into live execution.
-            _profile_mode = str((_acct_profile or {}).get("execution_mode") or "").lower()
-            _profile_auto = _profile_mode == "auto"
-            _effective_manual = (
-                self._is_manual_execution_mode()
-                or (_profile_mode in {"manual", "off", "paper"})
-                or not _profile_auto
-            )
+            if shares <= 0 and not _effective_manual:
+                cycle_policy_summary["live"]["rejected"] += 1
+                _record_active_signal_decision(
+                    execution_decision="SKIPPED_POLICY",
+                    decision_reason_code="ZERO_SIZING",
+                    decision_reason_json={
+                        "reason": "zero_sizing",
+                        "approved_qty": float(shares or 0.0),
+                        "profile_execution_mode": _profile_mode,
+                    },
+                )
+                _record_execution_attempt_fact(
+                    attempt_status="SKIPPED_POLICY",
+                    reason_code="ZERO_SIZING",
+                    response_json={
+                        "reason": "zero_sizing",
+                        "approved_qty": float(shares or 0.0),
+                        "profile_execution_mode": _profile_mode,
+                    },
+                )
+                logger.warning("Skipping %s — shares=%s", symbol, shares)
+                continue
             _journal_initial_status = (
                 "FORWARD_TRACKED"
                 if self._is_test_execution_mode() or _effective_manual
                 else "PENDING_FILL"
             )
-            _trade_id: Optional[str] = None
-            try:
-                _trade_id = _journal_insert_approval(
-                    db_path=self.db_path,
-                    profile_id=str(account or ""),
-                    candidate=_candidate,
-                    policy_decision=_policy_decision,
-                    cycle_ts_utc=_cycle_ts,
-                    status=_journal_initial_status,
-                )
-            except Exception as _exc:
-                logger.error("[trade_journal] insert_approval_row failed for %s: %s", symbol, _exc)
-            if _trade_id:
-                checkpoint_trade_ids.append(_trade_id)
+            if not self._is_test_execution_mode():
+                try:
+                    _trade_id = _journal_insert_approval(
+                        db_path=self.db_path,
+                        profile_id=str(account or ""),
+                        candidate=_candidate,
+                        policy_decision=_policy_decision,
+                        cycle_ts_utc=_cycle_ts,
+                        status=_journal_initial_status,
+                    )
+                except Exception as _exc:
+                    logger.error("[trade_journal] insert_approval_row failed for %s: %s", symbol, _exc)
+                if _trade_id:
+                    checkpoint_trade_ids.append(_trade_id)
             # ── End trade journal insert ───────────────────────────────────
 
             # ── Shadow execution log (Phase 5) ─────────────────────────────
             # Writes every would-be-submit in all modes for paper vs real diff.
-            try:
-                from vanguard.execution.shadow_log import ensure_tables as _shadow_ensure, insert_shadow_row as _shadow_insert
-                _shadow_ensure(self.db_path)
-                _shadow_payload = {
-                    "symbol": symbol,
-                    "direction": direction,
-                    "shares": float(shares or 0),
-                    "entry_price": float(entry_px or 0),
-                    "stop_loss": float(stop_loss or 0),
-                    "take_profit": float(take_profit or 0),
-                    "account": account,
-                    "execution_mode": self.execution_mode,
-                    "trade_id": _trade_id,
-                }
-                _shadow_insert(
-                    self.db_path,
-                    cycle_ts_utc=_cycle_ts,
-                    profile_id=str(account or ""),
-                    symbol=symbol,
-                    side=direction,
-                    qty=float(shares or 0),
-                    expected_entry=float(entry_px or 0),
-                    expected_sl=float(stop_loss or 0),
-                    expected_tp=float(take_profit or 0),
-                    execution_mode=self.execution_mode,
-                    metaapi_payload=_shadow_payload,
-                    notes=f"trade_id={_trade_id}",
-                )
-            except Exception as _shadow_exc:
-                logger.debug("[shadow_log] insert failed (non-blocking): %s", _shadow_exc)
+            if not self._is_test_execution_mode():
+                try:
+                    from vanguard.execution.shadow_log import ensure_tables as _shadow_ensure, insert_shadow_row as _shadow_insert
+                    _shadow_ensure(self.db_path)
+                    _shadow_payload = {
+                        "symbol": symbol,
+                        "direction": direction,
+                        "shares": float(shares or 0),
+                        "entry_price": float(entry_px or 0),
+                        "stop_loss": float(stop_loss or 0),
+                        "take_profit": float(take_profit or 0),
+                        "account": account,
+                        "execution_mode": self.execution_mode,
+                        "trade_id": _trade_id,
+                        "execution_policy_id": live_execution_policy_id or None,
+                    }
+                    _shadow_insert(
+                        self.db_path,
+                        cycle_ts_utc=_cycle_ts,
+                        profile_id=str(account or ""),
+                        symbol=symbol,
+                        side=direction,
+                        qty=float(shares or 0),
+                        expected_entry=float(entry_px or 0),
+                        expected_sl=float(stop_loss or 0),
+                        expected_tp=float(take_profit or 0),
+                        execution_mode=self.execution_mode,
+                        metaapi_payload=_shadow_payload,
+                        notes=f"trade_id={_trade_id} policy_id={live_execution_policy_id or ''}",
+                    )
+                except Exception as _shadow_exc:
+                    logger.debug("[shadow_log] insert failed (non-blocking): %s", _shadow_exc)
             # ── End shadow execution log ────────────────────────────────────
 
             if self._is_test_execution_mode():
-                _record_signal_decision(
+                _record_active_signal_decision(
                     execution_decision="EXECUTED",
                     decision_reason_code="TEST_NO_PERSIST",
                     decision_reason_json={
@@ -3205,7 +6801,18 @@ class VanguardOrchestrator:
                     },
                     trade_id=_trade_id,
                 )
+                cycle_policy_summary["live"]["executed"] += 1
+                cycle_policy_summary["live"]["forward_tracked"] += 1
                 forward += 1
+                _record_execution_attempt_fact(
+                    attempt_status="TEST_FORWARD_TRACKED",
+                    reason_code="TEST_NO_PERSIST",
+                    response_json={
+                        "execution_mode": self.execution_mode,
+                        "forward_tracked": True,
+                    },
+                    trade_id=_trade_id,
+                )
                 logger.info(
                     "[TEST NO_PERSIST] %s %s x%s account=%s trade_id=%s",
                     symbol,
@@ -3217,7 +6824,7 @@ class VanguardOrchestrator:
                 continue
 
             if _effective_manual:
-                _record_signal_decision(
+                _record_active_signal_decision(
                     execution_decision="EXECUTED",
                     decision_reason_code="MANUAL_FORWARD_TRACKED",
                     decision_reason_json={
@@ -3227,6 +6834,7 @@ class VanguardOrchestrator:
                     },
                     trade_id=_trade_id,
                 )
+                cycle_policy_summary["live"]["executed"] += 1
                 log_id = None
                 if not _skip_legacy_forward_track:
                     log_id = _write_execution_row(
@@ -3245,6 +6853,18 @@ class VanguardOrchestrator:
                         db_path=self.db_path,
                     )
                 forward += 1
+                cycle_policy_summary["live"]["forward_tracked"] += 1
+                _record_execution_attempt_fact(
+                    attempt_status="FORWARD_TRACKED",
+                    reason_code="MANUAL_FORWARD_TRACKED",
+                    response_json={
+                        "execution_mode": self.execution_mode,
+                        "forward_tracked": True,
+                        "manual_execution": True,
+                        "account_id": account,
+                    },
+                    trade_id=_trade_id,
+                )
                 logger.info(
                     "[MANUAL FORWARD_TRACKED] %s %s x%s account=%s (legacy_execution_log_id=%s)",
                     symbol,
@@ -3256,6 +6876,7 @@ class VanguardOrchestrator:
 
             else:
                 submitted += 1
+                cycle_policy_summary["live"]["executed"] += 1
                 # _acct_profile already fetched above; reuse it here.
                 profile = _acct_profile
                 bridge = str((profile or {}).get("execution_bridge") or "disabled").lower()
@@ -3284,6 +6905,26 @@ class VanguardOrchestrator:
                             state = gft_execution_state.get(account)
                             if state is None:
                                 open_positions = metaapi_executor.get_open_positions()
+                                if not open_positions:
+                                    fallback_positions = self._load_context_positions_snapshot(str(account or ""))
+                                    if fallback_positions:
+                                        open_positions = fallback_positions
+                                        logger.warning(
+                                            "[GFT METAAPI] %s positions fallback -> context snapshot count=%d bridge=%s",
+                                            account,
+                                            len(open_positions),
+                                            bridge,
+                                        )
+                                if not open_positions:
+                                    fallback_positions = self._load_open_journal_positions_snapshot(str(account or ""))
+                                    if fallback_positions:
+                                        open_positions = fallback_positions
+                                        logger.warning(
+                                            "[GFT METAAPI] %s positions fallback -> trade journal count=%d bridge=%s",
+                                            account,
+                                            len(open_positions),
+                                            bridge,
+                                        )
                                 open_symbols = {
                                     str(position.get("symbol") or "").upper().strip()
                                     for position in open_positions
@@ -3315,7 +6956,7 @@ class VanguardOrchestrator:
 
                             mapped_symbol = metaapi_symbol_fn(symbol) if metaapi_symbol_fn else symbol
                             if mapped_symbol in state["open_symbols"]:
-                                _record_signal_decision(
+                                _record_active_signal_decision(
                                     execution_decision="SKIPPED_DUPLICATE_SYMBOL_OPEN",
                                     decision_reason_code="METAAPI_SYMBOL_ALREADY_OPEN",
                                     decision_reason_json={
@@ -3325,6 +6966,7 @@ class VanguardOrchestrator:
                                     positions=list(state.get("open_positions") or []),
                                     trade_id=_trade_id,
                                 )
+                                cycle_policy_summary["live"]["forward_tracked"] += 1
                                 forward += 1
                                 if not _skip_legacy_forward_track:
                                     _write_execution_row(
@@ -3350,10 +6992,25 @@ class VanguardOrchestrator:
                                     direction,
                                     mapped_symbol,
                                 )
+                                _record_execution_attempt_fact(
+                                    attempt_status="FORWARD_TRACKED",
+                                    reason_code="METAAPI_SYMBOL_ALREADY_OPEN",
+                                    response_json={"broker_symbol": mapped_symbol},
+                                    trade_id=_trade_id,
+                                )
+                                if _trade_id:
+                                    try:
+                                        _journal_update_skipped_before_submit(
+                                            self.db_path,
+                                            _trade_id,
+                                            f"metaapi_symbol_already_open:{mapped_symbol}",
+                                        )
+                                    except Exception as _jexc:
+                                        logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
                                 continue
 
                             if state["remaining_slots"] <= 0:
-                                _record_signal_decision(
+                                _record_active_signal_decision(
                                     execution_decision="SKIPPED_NO_CAPACITY",
                                     decision_reason_code="METAAPI_MAX_POSITIONS_REACHED",
                                     decision_reason_json={
@@ -3363,6 +7020,7 @@ class VanguardOrchestrator:
                                     positions=list(state.get("open_positions") or []),
                                     trade_id=_trade_id,
                                 )
+                                cycle_policy_summary["live"]["forward_tracked"] += 1
                                 forward += 1
                                 if not _skip_legacy_forward_track:
                                     _write_execution_row(
@@ -3388,9 +7046,26 @@ class VanguardOrchestrator:
                                     direction,
                                     account,
                                 )
+                                _record_execution_attempt_fact(
+                                    attempt_status="FORWARD_TRACKED",
+                                    reason_code="METAAPI_MAX_POSITIONS_REACHED",
+                                    response_json={
+                                        "broker_open_symbols": sorted(state["open_symbols"]),
+                                    },
+                                    trade_id=_trade_id,
+                                )
+                                if _trade_id:
+                                    try:
+                                        _journal_update_skipped_before_submit(
+                                            self.db_path,
+                                            _trade_id,
+                                            "metaapi_max_positions_reached",
+                                        )
+                                    except Exception as _jexc:
+                                        logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
                                 continue
 
-                            _decision_id = _record_signal_decision(
+                            _decision_id = _record_active_signal_decision(
                                 execution_decision="EXECUTED",
                                 decision_reason_code="METAAPI_SUBMIT",
                                 decision_reason_json={
@@ -3410,8 +7085,10 @@ class VanguardOrchestrator:
                             status = "FILLED" if resp.get("status") == "filled" else "FAILED"
                             if status == "FILLED":
                                 filled += 1
+                                cycle_policy_summary["live"]["filled"] += 1
                             else:
                                 failed += 1
+                                cycle_policy_summary["live"]["failed"] += 1
                                 failure_reasons[str(resp.get("error") or "unknown")] += 1
                             _write_execution_row(
                                 symbol=symbol, direction=direction, tier=tier,
@@ -3449,7 +7126,13 @@ class VanguardOrchestrator:
                                             trade_id=_trade_id,
                                             broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
                                             fill_price=float(resp.get("price") or entry_px or 0.0),
-                                            fill_qty=float(shares),
+                                            fill_qty=float(
+                                                resp.get("submitted_lots")
+                                                or resp.get("filled_qty")
+                                                or resp.get("qty")
+                                                or (resp.get("request") or {}).get("volume")
+                                                or shares
+                                            ),
                                             filled_at_utc=_now_s,
                                             expected_entry=float(entry_px or 0.0),
                                             side=direction,
@@ -3472,6 +7155,19 @@ class VanguardOrchestrator:
                                         )
                                 except Exception as _jexc:
                                     logger.warning("[trade_journal] post-fill update failed: %s", _jexc)
+                            _record_execution_attempt_fact(
+                                attempt_status=status,
+                                reason_code=(
+                                    "METAAPI_SUBMIT_FILLED"
+                                    if status == "FILLED"
+                                    else str(resp.get("error") or "broker_rejected")
+                                ),
+                                response_json=resp,
+                                broker_order_id=str(resp.get("order_id") or resp.get("id") or ""),
+                                broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                                execution_bridge=bridge,
+                                trade_id=_trade_id,
+                            )
                             # ── End trade journal update ───────────────────
                             logger.info(
                                 "[GFT METAAPI] %s %s x%s stop=%s tp=%s -> %s",
@@ -3497,7 +7193,7 @@ class VanguardOrchestrator:
                                     }
                                 )
                         else:
-                            _record_signal_decision(
+                            _record_active_signal_decision(
                                 execution_decision="SKIPPED_POLICY",
                                 decision_reason_code="METAAPI_NOT_CONNECTED",
                                 decision_reason_json={
@@ -3506,6 +7202,7 @@ class VanguardOrchestrator:
                                 },
                                 trade_id=_trade_id,
                             )
+                            cycle_policy_summary["live"]["forward_tracked"] += 1
                             forward += 1
                             log_id = None
                             if not _skip_legacy_forward_track:
@@ -3543,6 +7240,22 @@ class VanguardOrchestrator:
                                 symbol,
                                 direction,
                             )
+                            _record_execution_attempt_fact(
+                                attempt_status="FORWARD_TRACKED",
+                                reason_code="METAAPI_NOT_CONNECTED",
+                                response_json={"error": "metaapi_connect_failed"},
+                                execution_bridge=bridge,
+                                trade_id=_trade_id,
+                            )
+                            if _trade_id:
+                                try:
+                                    _journal_update_skipped_before_submit(
+                                        self.db_path,
+                                        _trade_id,
+                                        "metaapi_connect_failed",
+                                    )
+                                except Exception as _jexc:
+                                    logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
                     except Exception as exc:
                         if _decision_id:
                             _signal_decision_update(
@@ -3554,7 +7267,17 @@ class VanguardOrchestrator:
                                 decision_reason_json={"error": str(exc), "execution_bridge": bridge},
                             )
                         failed += 1
+                        cycle_policy_summary["live"]["failed"] += 1
                         failure_reasons[str(exc)] += 1
+                        if _trade_id:
+                            try:
+                                _journal_update_skipped_before_submit(
+                                    self.db_path,
+                                    _trade_id,
+                                    f"metaapi_execution_exception:{exc}",
+                                )
+                            except Exception as _jexc:
+                                logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
                         logger.error("MetaApi execution failed: %s", exc)
                         _write_execution_row(
                             symbol=symbol, direction=direction, tier=tier,
@@ -3564,6 +7287,407 @@ class VanguardOrchestrator:
                             response_json={"error": str(exc), "execution_bridge": bridge, "account_id": account},
                             account=account, source_scores=scores,
                             db_path=self.db_path,
+                        )
+                        _record_execution_attempt_fact(
+                            attempt_status="FAILED",
+                            reason_code="METAAPI_EXECUTION_EXCEPTION",
+                            response_json={"error": str(exc), "execution_bridge": bridge},
+                            execution_bridge=bridge,
+                            trade_id=_trade_id,
+                        )
+                    continue
+
+                if bridge.startswith("metaapi_"):
+                    try:
+                        if metaapi_executor_cls is None or metaapi_symbol_same_fn is None:
+                            from vanguard.executors.mt5_executor import MetaApiExecutor as metaapi_executor_cls
+                            from vanguard.symbols import is_same_canonical as metaapi_symbol_same_fn
+                        bridges_cfg = (((self._runtime_config or {}).get("execution") or {}).get("bridges") or {})
+                        bridge_cfg = dict(bridges_cfg.get(bridge) or {})
+                        metaapi_executor = metaapi_executors.get(account)
+                        if metaapi_executor is None:
+                            account_key = bridge[len("metaapi_") :] if bridge.startswith("metaapi_") else account
+                            metaapi_executor = metaapi_executor_cls(
+                                account_key=account_key,
+                                account_id=str(bridge_cfg.get("account_id") or ""),
+                                token=str(bridge_cfg.get("api_token") or ""),
+                                base_url=str(bridge_cfg.get("base_url") or ""),
+                                timeout=float(bridge_cfg.get("timeout_s") or 30),
+                            )
+                            metaapi_executors[account] = metaapi_executor
+
+                        if metaapi_executor.connect():
+                            state = metaapi_execution_state.get(account)
+                            if state is None:
+                                open_positions = metaapi_executor.get_open_positions()
+                                if not open_positions:
+                                    fallback_positions = self._load_context_positions_snapshot(str(account or ""))
+                                    if fallback_positions:
+                                        open_positions = fallback_positions
+                                        logger.warning(
+                                            "[METAAPI] %s positions fallback -> context snapshot count=%d bridge=%s",
+                                            account,
+                                            len(open_positions),
+                                            bridge,
+                                        )
+                                if not open_positions:
+                                    fallback_positions = self._load_open_journal_positions_snapshot(str(account or ""))
+                                    if fallback_positions:
+                                        open_positions = fallback_positions
+                                        logger.warning(
+                                            "[METAAPI] %s positions fallback -> trade journal count=%d bridge=%s",
+                                            account,
+                                            len(open_positions),
+                                            bridge,
+                                        )
+                                open_symbols = {
+                                    str(position.get("symbol") or "").upper().strip()
+                                    for position in open_positions
+                                    if str(position.get("symbol") or "").strip()
+                                }
+                                max_slots = self._get_max_open_positions(str(account or ""))
+                                state = {
+                                    "open_symbols": open_symbols,
+                                    "remaining_slots": max(max_slots - len(open_positions), 0) if max_slots > 0 else 0,
+                                    "open_positions": [
+                                        {
+                                            "ticket": str(position.get("ticket") or position.get("id") or position.get("positionId") or ""),
+                                            "broker_position_id": str(position.get("position_id") or position.get("positionId") or position.get("id") or ""),
+                                            "symbol": str(position.get("symbol") or "").upper().strip(),
+                                            "direction": str(position.get("side") or position.get("direction") or "").upper().replace("_", ""),
+                                            "qty": position.get("qty") if position.get("qty") is not None else position.get("volume"),
+                                            "unrealized_pnl": position.get("pnl") if position.get("pnl") is not None else position.get("profit"),
+                                            "holding_minutes": position.get("holding_minutes"),
+                                        }
+                                        for position in open_positions
+                                    ],
+                                }
+                                metaapi_execution_state[account] = state
+                                logger.info(
+                                    "[METAAPI] %s open_positions=%d remaining_slots=%d bridge=%s",
+                                    account,
+                                    len(open_positions),
+                                    state["remaining_slots"],
+                                    bridge,
+                                )
+
+                            if any(
+                                metaapi_symbol_same_fn(position.get("symbol"), symbol)
+                                for position in (state.get("open_positions") or [])
+                            ):
+                                _record_active_signal_decision(
+                                    execution_decision="SKIPPED_DUPLICATE_SYMBOL_OPEN",
+                                    decision_reason_code="METAAPI_SYMBOL_ALREADY_OPEN",
+                                    decision_reason_json={
+                                        "execution_bridge": bridge,
+                                    },
+                                    positions=list(state.get("open_positions") or []),
+                                    trade_id=_trade_id,
+                                )
+                                cycle_policy_summary["live"]["forward_tracked"] += 1
+                                forward += 1
+                                if not _skip_legacy_forward_track:
+                                    _write_execution_row(
+                                        symbol=symbol, direction=direction, tier=tier,
+                                        shares=shares, entry_price=entry_px,
+                                        stop_loss=stop_loss, take_profit=take_profit,
+                                        status="FORWARD_TRACKED",
+                                        response_json={
+                                            "mode": self.execution_mode,
+                                            "forward_tracked": True,
+                                            "execution_bridge": bridge,
+                                            "account_id": account,
+                                            "reason": "metaapi_symbol_already_open",
+                                        },
+                                        account=account, source_scores=scores,
+                                        tags=["vanguard", "metaapi", "already_open"],
+                                        db_path=self.db_path,
+                                    )
+                                logger.info(
+                                    "[METAAPI] %s %s skipped — already open",
+                                    symbol,
+                                    direction,
+                                )
+                                if _trade_id:
+                                    try:
+                                        _journal_update_skipped_before_submit(
+                                            self.db_path,
+                                            _trade_id,
+                                            "metaapi_symbol_already_open",
+                                        )
+                                    except Exception as _jexc:
+                                        logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
+                                continue
+
+                            if state["remaining_slots"] <= 0:
+                                _record_active_signal_decision(
+                                    execution_decision="SKIPPED_NO_CAPACITY",
+                                    decision_reason_code="METAAPI_MAX_POSITIONS_REACHED",
+                                    decision_reason_json={
+                                        "execution_bridge": bridge,
+                                        "broker_open_symbols": sorted(state["open_symbols"]),
+                                    },
+                                    positions=list(state.get("open_positions") or []),
+                                    trade_id=_trade_id,
+                                )
+                                cycle_policy_summary["live"]["forward_tracked"] += 1
+                                forward += 1
+                                if not _skip_legacy_forward_track:
+                                    _write_execution_row(
+                                        symbol=symbol, direction=direction, tier=tier,
+                                        shares=shares, entry_price=entry_px,
+                                        stop_loss=stop_loss, take_profit=take_profit,
+                                        status="FORWARD_TRACKED",
+                                        response_json={
+                                            "mode": self.execution_mode,
+                                            "forward_tracked": True,
+                                            "execution_bridge": bridge,
+                                            "account_id": account,
+                                            "reason": "metaapi_max_positions_reached",
+                                            "broker_open_symbols": sorted(state["open_symbols"]),
+                                        },
+                                        account=account, source_scores=scores,
+                                        tags=["vanguard", "metaapi", "max_positions"],
+                                        db_path=self.db_path,
+                                    )
+                                logger.info(
+                                    "[METAAPI] %s %s skipped — max positions reached for %s",
+                                    symbol,
+                                    direction,
+                                    account,
+                                )
+                                _record_execution_attempt_fact(
+                                    attempt_status="FORWARD_TRACKED",
+                                    reason_code="METAAPI_MAX_POSITIONS_REACHED",
+                                    response_json={
+                                        "broker_open_symbols": sorted(state["open_symbols"]),
+                                    },
+                                    execution_bridge=bridge,
+                                    trade_id=_trade_id,
+                                )
+                                if _trade_id:
+                                    try:
+                                        _journal_update_skipped_before_submit(
+                                            self.db_path,
+                                            _trade_id,
+                                            "metaapi_max_positions_reached",
+                                        )
+                                    except Exception as _jexc:
+                                        logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
+                                continue
+
+                            _decision_id = _record_active_signal_decision(
+                                execution_decision="EXECUTED",
+                                decision_reason_code="METAAPI_SUBMIT",
+                                decision_reason_json={
+                                    "execution_bridge": bridge,
+                                },
+                                positions=list(state.get("open_positions") or []),
+                                trade_id=_trade_id,
+                            )
+                            resp = metaapi_executor.execute_trade(
+                                symbol=symbol,
+                                direction=direction,
+                                lot_size=float(shares),
+                                stop_loss=stop_loss,
+                                take_profit=take_profit,
+                            )
+                            status = "FILLED" if resp.get("status") == "filled" else "FAILED"
+                            if status == "FILLED":
+                                filled += 1
+                                cycle_policy_summary["live"]["filled"] += 1
+                            else:
+                                failed += 1
+                                cycle_policy_summary["live"]["failed"] += 1
+                                failure_reasons[str(resp.get("error") or "unknown")] += 1
+                            _write_execution_row(
+                                symbol=symbol, direction=direction, tier=tier,
+                                shares=shares, entry_price=resp.get("price") or entry_px,
+                                stop_loss=stop_loss, take_profit=take_profit,
+                                status=status, response_json=resp,
+                                account=account, source_scores=scores,
+                                db_path=self.db_path,
+                            )
+                            if status == "FILLED" and _decision_id:
+                                _signal_decision_update(
+                                    self.db_path,
+                                    _decision_id,
+                                    trade_id=_trade_id,
+                                    broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                                )
+                            if _trade_id:
+                                try:
+                                    _now_s = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                                    _broker_order_id = str(resp.get("order_id") or resp.get("id") or "")
+                                    if _broker_order_id:
+                                        _journal_update_submitted(
+                                            self.db_path, _trade_id, _broker_order_id, _now_s
+                                        )
+                                    if status == "FILLED":
+                                        _signal_decision_update(
+                                            self.db_path,
+                                            _decision_id,
+                                            trade_id=_trade_id,
+                                            broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                                        )
+                                        _journal_update_filled(
+                                            db_path=self.db_path,
+                                            trade_id=_trade_id,
+                                            broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                                            fill_price=float(resp.get("price") or entry_px or 0.0),
+                                            fill_qty=float(
+                                                resp.get("submitted_lots")
+                                                or resp.get("filled_qty")
+                                                or resp.get("qty")
+                                                or (resp.get("request") or {}).get("volume")
+                                                or shares
+                                            ),
+                                            filled_at_utc=_now_s,
+                                            expected_entry=float(entry_px or 0.0),
+                                            side=direction,
+                                        )
+                                    else:
+                                        _signal_decision_update(
+                                            self.db_path,
+                                            _decision_id,
+                                            trade_id=_trade_id,
+                                            execution_decision="EXECUTION_FAILED",
+                                            decision_reason_code="BROKER_REJECTED",
+                                            decision_reason_json={
+                                                "error": str(resp.get("error") or "broker_rejected"),
+                                                "execution_bridge": bridge,
+                                            },
+                                        )
+                                        _journal_update_rejected(
+                                            self.db_path, _trade_id,
+                                            str(resp.get("error") or "broker_rejected"),
+                                        )
+                                except Exception as _jexc:
+                                    logger.warning("[trade_journal] post-fill update failed: %s", _jexc)
+                            _record_execution_attempt_fact(
+                                attempt_status=status,
+                                reason_code=(
+                                    "METAAPI_SUBMIT_FILLED"
+                                    if status == "FILLED"
+                                    else str(resp.get("error") or "broker_rejected")
+                                ),
+                                response_json=resp,
+                                broker_order_id=str(resp.get("order_id") or resp.get("id") or ""),
+                                broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                                execution_bridge=bridge,
+                                trade_id=_trade_id,
+                            )
+                            logger.info(
+                                "[METAAPI] %s %s x%s stop=%s tp=%s -> %s",
+                                symbol,
+                                direction,
+                                shares,
+                                stop_loss,
+                                take_profit,
+                                resp.get("status"),
+                            )
+                            if status == "FILLED":
+                                state["open_symbols"].add(str(resp.get("symbol") or symbol).upper())
+                                state["remaining_slots"] = max(0, int(state["remaining_slots"]) - 1)
+                                state.setdefault("open_positions", []).append(
+                                    {
+                                        "ticket": str(resp.get("order_id") or resp.get("id") or ""),
+                                        "broker_position_id": str(resp.get("position_id") or resp.get("id") or ""),
+                                        "symbol": str(resp.get("symbol") or symbol).upper(),
+                                        "direction": str(direction or "").upper(),
+                                        "qty": float(shares),
+                                        "unrealized_pnl": 0.0,
+                                        "holding_minutes": 0.0,
+                                    }
+                                )
+                        else:
+                            _record_active_signal_decision(
+                                execution_decision="SKIPPED_POLICY",
+                                decision_reason_code="METAAPI_NOT_CONNECTED",
+                                decision_reason_json={
+                                    "execution_bridge": bridge,
+                                    "forward_tracked": True,
+                                },
+                                trade_id=_trade_id,
+                            )
+                            cycle_policy_summary["live"]["forward_tracked"] += 1
+                            forward += 1
+                            if not _skip_legacy_forward_track:
+                                _write_execution_row(
+                                    symbol=symbol, direction=direction, tier=tier,
+                                    shares=shares, entry_price=entry_px,
+                                    stop_loss=stop_loss, take_profit=take_profit,
+                                    status="FORWARD_TRACKED",
+                                    response_json={
+                                        "mode": self.execution_mode,
+                                        "forward_tracked": True,
+                                        "execution_bridge": bridge,
+                                        "account_id": account,
+                                        "error": "metaapi_connect_failed",
+                                    },
+                                    account=account, source_scores=scores,
+                                    tags=["vanguard", "metaapi", "forward_tracked"],
+                                    db_path=self.db_path,
+                                )
+                            logger.warning(
+                                "[METAAPI] %s %s forward-tracked because MetaApi connect failed",
+                                symbol,
+                                direction,
+                            )
+                            _record_execution_attempt_fact(
+                                attempt_status="FORWARD_TRACKED",
+                                reason_code="METAAPI_NOT_CONNECTED",
+                                response_json={"error": "metaapi_connect_failed"},
+                                execution_bridge=bridge,
+                                trade_id=_trade_id,
+                            )
+                            if _trade_id:
+                                try:
+                                    _journal_update_skipped_before_submit(
+                                        self.db_path,
+                                        _trade_id,
+                                        "metaapi_connect_failed",
+                                    )
+                                except Exception as _jexc:
+                                    logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
+                    except Exception as exc:
+                        if _decision_id:
+                            _signal_decision_update(
+                                self.db_path,
+                                _decision_id,
+                                trade_id=_trade_id,
+                                execution_decision="EXECUTION_FAILED",
+                                decision_reason_code="METAAPI_EXECUTION_EXCEPTION",
+                                decision_reason_json={"error": str(exc), "execution_bridge": bridge},
+                            )
+                        failed += 1
+                        cycle_policy_summary["live"]["failed"] += 1
+                        failure_reasons[str(exc)] += 1
+                        if _trade_id:
+                            try:
+                                _journal_update_skipped_before_submit(
+                                    self.db_path,
+                                    _trade_id,
+                                    f"metaapi_execution_exception:{exc}",
+                                )
+                            except Exception as _jexc:
+                                logger.warning("[trade_journal] skip-before-submit update failed: %s", _jexc)
+                        logger.error("MetaApi execution failed: %s", exc)
+                        _write_execution_row(
+                            symbol=symbol, direction=direction, tier=tier,
+                            shares=shares, entry_price=None,
+                            stop_loss=stop_loss, take_profit=take_profit,
+                            status="FAILED",
+                            response_json={"error": str(exc), "execution_bridge": bridge, "account_id": account},
+                            account=account, source_scores=scores,
+                            db_path=self.db_path,
+                        )
+                        _record_execution_attempt_fact(
+                            attempt_status="FAILED",
+                            reason_code="METAAPI_EXECUTION_EXCEPTION",
+                            response_json={"error": str(exc), "execution_bridge": bridge},
+                            execution_bridge=bridge,
+                            trade_id=_trade_id,
                         )
                     continue
 
@@ -3577,7 +7701,7 @@ class VanguardOrchestrator:
                             db_path=self.db_path,
                         )
                         if not dwx_exec.connect():
-                            _record_signal_decision(
+                            _record_active_signal_decision(
                                 execution_decision="SKIPPED_POLICY",
                                 decision_reason_code="DWX_NOT_CONNECTED",
                                 decision_reason_json={
@@ -3586,6 +7710,7 @@ class VanguardOrchestrator:
                                 },
                                 trade_id=_trade_id,
                             )
+                            cycle_policy_summary["live"]["forward_tracked"] += 1
                             forward += 1
                             if not _skip_legacy_forward_track:
                                 _write_execution_row(
@@ -3615,7 +7740,7 @@ class VanguardOrchestrator:
                             if p.get("symbol")
                         }
                         if symbol.upper() in open_dwx_symbols:
-                            _record_signal_decision(
+                            _record_active_signal_decision(
                                 execution_decision="SKIPPED_DUPLICATE_SYMBOL_OPEN",
                                 decision_reason_code="DWX_SYMBOL_ALREADY_OPEN",
                                 decision_reason_json={
@@ -3635,6 +7760,7 @@ class VanguardOrchestrator:
                                 ],
                                 trade_id=_trade_id,
                             )
+                            cycle_policy_summary["live"]["forward_tracked"] += 1
                             forward += 1
                             if not _skip_legacy_forward_track:
                                 _write_execution_row(
@@ -3656,7 +7782,48 @@ class VanguardOrchestrator:
                             logger.info("[MT5 LOCAL] %s %s skipped — already open via DWX", symbol, direction)
                             continue
 
-                        _decision_id = _record_signal_decision(
+                        recent_dwx_activity = self._dwx_bridge_recent_lifecycle_activity(account, lookback_seconds=180)
+                        if recent_dwx_activity:
+                            _record_active_signal_decision(
+                                execution_decision="SKIPPED_POLICY",
+                                decision_reason_code="DWX_BRIDGE_BUSY_RECENT_LIFECYCLE",
+                                decision_reason_json={
+                                    "execution_bridge": bridge,
+                                    "recent_action": recent_dwx_activity,
+                                },
+                                trade_id=_trade_id,
+                            )
+                            cycle_policy_summary["live"]["forward_tracked"] += 1
+                            forward += 1
+                            if not _skip_legacy_forward_track:
+                                _write_execution_row(
+                                    symbol=symbol, direction=direction, tier=tier,
+                                    shares=shares, entry_price=entry_px,
+                                    stop_loss=stop_loss, take_profit=take_profit,
+                                    status="FORWARD_TRACKED",
+                                    response_json={
+                                        "mode": self.execution_mode,
+                                        "forward_tracked": True,
+                                        "execution_bridge": bridge,
+                                        "account_id": account,
+                                        "reason": "dwx_bridge_busy_recent_lifecycle",
+                                        "recent_action": recent_dwx_activity,
+                                    },
+                                    account=account, source_scores=scores,
+                                    tags=["vanguard", "mt5_local", "bridge_busy"],
+                                    db_path=self.db_path,
+                                )
+                            logger.info(
+                                "[MT5 LOCAL] %s %s forward-tracked — recent lifecycle activity on DWX bridge request_id=%s action=%s status=%s",
+                                symbol,
+                                direction,
+                                recent_dwx_activity.get("request_id"),
+                                recent_dwx_activity.get("action_type"),
+                                recent_dwx_activity.get("status"),
+                            )
+                            continue
+
+                        _decision_id = _record_active_signal_decision(
                             execution_decision="EXECUTED",
                             decision_reason_code="DWX_SUBMIT",
                             decision_reason_json={
@@ -3686,8 +7853,10 @@ class VanguardOrchestrator:
                         status = "FILLED" if resp.get("status") == "filled" else "FAILED"
                         if status == "FILLED":
                             filled += 1
+                            cycle_policy_summary["live"]["filled"] += 1
                         else:
                             failed += 1
+                            cycle_policy_summary["live"]["failed"] += 1
                             failure_reasons[str(resp.get("error") or "unknown")] += 1
                         _write_execution_row(
                             symbol=symbol, direction=direction, tier=tier,
@@ -3717,7 +7886,13 @@ class VanguardOrchestrator:
                                         trade_id=_trade_id,
                                         broker_position_id=str(resp.get("position_id") or _ticket or ""),
                                         fill_price=float(resp.get("price") or entry_px or 0.0),
-                                        fill_qty=float(shares),
+                                        fill_qty=float(
+                                            resp.get("submitted_lots")
+                                            or resp.get("filled_qty")
+                                            or resp.get("qty")
+                                            or (resp.get("request") or {}).get("volume")
+                                            or shares
+                                        ),
                                         filled_at_utc=_now_s,
                                         expected_entry=float(entry_px or 0.0),
                                         side=direction,
@@ -3740,6 +7915,19 @@ class VanguardOrchestrator:
                                     )
                             except Exception as _jexc:
                                 logger.warning("[trade_journal] DWX post-fill update failed: %s", _jexc)
+                        _record_execution_attempt_fact(
+                            attempt_status=status,
+                            reason_code=(
+                                "DWX_SUBMIT_FILLED"
+                                if status == "FILLED"
+                                else str(resp.get("error") or "dwx_rejected")
+                            ),
+                            response_json=resp,
+                            broker_order_id=str(resp.get("orderId") or resp.get("id") or ""),
+                            broker_position_id=str(resp.get("position_id") or resp.get("orderId") or resp.get("id") or ""),
+                            execution_bridge=bridge,
+                            trade_id=_trade_id,
+                        )
                         logger.info(
                             "[MT5 LOCAL] %s %s x%.5f sl=%.5f tp=%.5f -> %s ticket=%s",
                             symbol, direction, shares, stop_loss or 0, take_profit or 0,
@@ -3756,6 +7944,7 @@ class VanguardOrchestrator:
                                 decision_reason_json={"error": str(exc), "execution_bridge": bridge},
                             )
                         failed += 1
+                        cycle_policy_summary["live"]["failed"] += 1
                         failure_reasons[str(exc)] += 1
                         logger.error("[MT5 LOCAL] execution failed for %s: %s", symbol, exc)
                         _write_execution_row(
@@ -3767,11 +7956,18 @@ class VanguardOrchestrator:
                             account=account, source_scores=scores,
                             db_path=self.db_path,
                         )
+                        _record_execution_attempt_fact(
+                            attempt_status="FAILED",
+                            reason_code="DWX_EXECUTION_EXCEPTION",
+                            response_json={"error": str(exc), "execution_bridge": bridge},
+                            execution_bridge=bridge,
+                            trade_id=_trade_id,
+                        )
                     continue
                 # ── End DWX bridge ──────────────────────────────────────────
 
                 if bridge != "signalstack" or not webhook_url:
-                    _record_signal_decision(
+                    _record_active_signal_decision(
                         execution_decision="SKIPPED_POLICY",
                         decision_reason_code="BRIDGE_FORWARD_TRACKED",
                         decision_reason_json={
@@ -3781,6 +7977,7 @@ class VanguardOrchestrator:
                         },
                         trade_id=_trade_id,
                     )
+                    cycle_policy_summary["live"]["forward_tracked"] += 1
                     if bridge == "mt5":
                         logger.info("[V7] MT5 execution not yet implemented for %s", account)
                     elif bridge == "signalstack":
@@ -3803,10 +8000,21 @@ class VanguardOrchestrator:
                             account=account, source_scores=scores,
                             db_path=self.db_path,
                         )
+                    _record_execution_attempt_fact(
+                        attempt_status="FORWARD_TRACKED",
+                        reason_code="BRIDGE_FORWARD_TRACKED",
+                        response_json={
+                            "execution_bridge": bridge,
+                            "webhook_configured": bool(webhook_url),
+                            "forward_tracked": True,
+                        },
+                        execution_bridge=bridge,
+                        trade_id=_trade_id,
+                    )
                     continue
 
                 try:
-                    _decision_id = _record_signal_decision(
+                    _decision_id = _record_active_signal_decision(
                         execution_decision="EXECUTED",
                         decision_reason_code="SIGNALSTACK_SUBMIT",
                         decision_reason_json={
@@ -3823,8 +8031,10 @@ class VanguardOrchestrator:
 
                     if resp.get("success"):
                         filled += 1
+                        cycle_policy_summary["live"]["filled"] += 1
                     else:
                         failed += 1
+                        cycle_policy_summary["live"]["failed"] += 1
                         failure_reasons[str(resp.get("error") or "unknown")] += 1
 
                     _write_execution_row(
@@ -3852,7 +8062,13 @@ class VanguardOrchestrator:
                                     trade_id=_trade_id,
                                     broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
                                     fill_price=float(entry_px or 0.0),
-                                    fill_qty=float(shares),
+                                    fill_qty=float(
+                                        resp.get("submitted_lots")
+                                        or resp.get("filled_qty")
+                                        or resp.get("qty")
+                                        or (resp.get("request") or {}).get("volume")
+                                        or shares
+                                    ),
                                     filled_at_utc=_now_s,
                                     expected_entry=float(entry_px or 0.0),
                                     side=direction,
@@ -3875,6 +8091,19 @@ class VanguardOrchestrator:
                                 )
                         except Exception as _jexc:
                             logger.warning("[trade_journal] SignalStack post-fill update failed: %s", _jexc)
+                    _record_execution_attempt_fact(
+                        attempt_status=status,
+                        reason_code=(
+                            "SIGNALSTACK_SUBMIT_FILLED"
+                            if status == "FILLED"
+                            else str(resp.get("error") or "broker_rejected")
+                        ),
+                        response_json=resp,
+                        broker_order_id=str(resp.get("orderId") or resp.get("id") or ""),
+                        broker_position_id=str(resp.get("position_id") or resp.get("id") or ""),
+                        execution_bridge=bridge,
+                        trade_id=_trade_id,
+                    )
                     # ── End trade journal update ───────────────────────────
                     logger.info(
                         "[%s] %s %s x%d → %s",
@@ -3892,6 +8121,7 @@ class VanguardOrchestrator:
                             decision_reason_json={"error": str(exc), "execution_bridge": bridge},
                         )
                     failed += 1
+                    cycle_policy_summary["live"]["failed"] += 1
                     failure_reasons[str(exc)] += 1
                     logger.error("Execution error for %s: %s", symbol, exc)
                     _write_execution_row(
@@ -3902,6 +8132,13 @@ class VanguardOrchestrator:
                         response_json={"error": str(exc)},
                         account=account, source_scores=scores,
                         db_path=self.db_path,
+                    )
+                    _record_execution_attempt_fact(
+                        attempt_status="FAILED",
+                        reason_code="SIGNALSTACK_EXCEPTION",
+                        response_json={"error": str(exc), "execution_bridge": bridge},
+                        execution_bridge=bridge,
+                        trade_id=_trade_id,
                     )
 
         if checkpoint_trade_ids:
@@ -3916,10 +8153,39 @@ class VanguardOrchestrator:
         if gft_time_exit_msg:
             self._send_telegram(gft_time_exit_msg)
 
+        self._last_execution_policy_summary = cycle_policy_summary
+        live_shortlist_msg = self._build_live_trade_shortlist_telegram(
+            str(cycle_ts or approved[0].get("cycle_ts_utc") or ""),
+            cycle_policy_summary,
+        )
+        if live_shortlist_msg:
+            self._send_telegram(live_shortlist_msg, message_type="SHORTLIST")
+
         logger.info(
             "Execution: submitted=%d, filled=%d, failed=%d, forward_tracked=%d",
             submitted, filled, failed, forward,
         )
+        live_summary = dict(cycle_policy_summary.get("live") or {})
+        execution_summary = {
+            "v6_approved_rows": len(approved),
+            "live_approved_rows": int(live_summary.get("approved", 0) or 0),
+            "submitted": submitted,
+            "filled": filled,
+            "failed": failed,
+            "forward_tracked": forward,
+            "failure_reasons": dict(failure_reasons),
+            "cycle_policy_summary": cycle_policy_summary,
+            "v6_approved_symbols": [
+                {
+                    "symbol": str(row.get("symbol") or "").upper(),
+                    "direction": str(row.get("direction") or "").upper(),
+                    "shares_or_lots": row.get("shares_or_lots"),
+                }
+                for row in approved[:20]
+            ],
+        }
+        self._record_cycle_trace_execution(str(cycle_ts or approved[0].get("cycle_ts_utc") or ""), execution_summary)
+        return execution_summary
 
     # ------------------------------------------------------------------
     # EOD Flatten
@@ -4234,6 +8500,8 @@ class VanguardOrchestrator:
         active_profile_placeholders = ",".join("?" for _ in active_profile_ids) or "''"
         try:
             with sqlite_conn(self.db_path) as con:
+                s_cols = self._table_columns(con, "vanguard_v5_selection")
+                t_cols = self._table_columns(con, "vanguard_v5_tradeability")
                 shortlist_rows = con.execute(
                     """
                     SELECT symbol, asset_class, direction, predicted_return, edge_score, rank
@@ -4243,23 +8511,68 @@ class VanguardOrchestrator:
                     """,
                     (cycle_ts,),
                 ).fetchall()
+                t_conviction = self._optional_col_expr(t_cols, "t", "conviction", out_alias="conviction")
+                t_economics_state = self._optional_col_expr(
+                    t_cols, "t", "economics_state", fallback_sql="''", out_alias="economics_state"
+                )
+                t_live_followthrough_state = self._optional_col_expr(
+                    t_cols, "t", "live_followthrough_state", fallback_sql="''", out_alias="live_followthrough_state"
+                )
+                t_predicted_move_pips = self._optional_col_expr(
+                    t_cols, "t", "predicted_move_pips", out_alias="predicted_move_pips"
+                )
+                t_after_cost_pips = self._optional_col_expr(
+                    t_cols, "t", "after_cost_pips", out_alias="after_cost_pips"
+                )
+                t_predicted_move_bps = self._optional_col_expr(
+                    t_cols, "t", "predicted_move_bps", out_alias="predicted_move_bps"
+                )
+                t_after_cost_bps = self._optional_col_expr(
+                    t_cols, "t", "after_cost_bps", out_alias="after_cost_bps"
+                )
+                s_selection_reason = self._optional_col_expr(
+                    s_cols, "s", "selection_reason", fallback_sql="''", out_alias="selection_reason"
+                )
+                s_route_tier = self._optional_col_expr(
+                    s_cols, "s", "route_tier", fallback_sql="''", out_alias="route_tier"
+                )
+                s_display_label = self._optional_col_expr(
+                    s_cols, "s", "display_label", fallback_sql="''", out_alias="display_label"
+                )
+                s_selection_state = self._optional_col_expr(
+                    s_cols, "s", "selection_state", fallback_sql="''", out_alias="selection_state"
+                )
+                s_direction_streak = self._optional_col_expr(
+                    s_cols, "s", "direction_streak", fallback_sql="0", out_alias="direction_streak"
+                )
+                s_top_rank_streak = self._optional_col_expr(
+                    s_cols, "s", "top_rank_streak", fallback_sql="0", out_alias="top_rank_streak"
+                )
+                s_flip_count_window = self._optional_col_expr(
+                    s_cols, "s", "flip_count_window", fallback_sql="0", out_alias="flip_count_window"
+                )
                 v5_rows = con.execute(
-                    """
+                    f"""
                     SELECT s.profile_id,
                            s.symbol,
                            s.asset_class,
                            s.direction,
                            t.predicted_return,
-                           t.economics_state,
+                           {t_conviction},
+                           {t_economics_state},
                            s.selection_rank,
-                           s.route_tier,
-                           s.display_label,
-                           s.selection_state,
-                           s.direction_streak,
-                           t.predicted_move_pips,
-                           t.after_cost_pips,
-                           t.predicted_move_bps,
-                           t.after_cost_bps
+                           {s_selection_reason},
+                           {s_route_tier},
+                           {s_display_label},
+                           {s_selection_state},
+                           {s_direction_streak},
+                           {s_top_rank_streak},
+                           {s_flip_count_window},
+                           {t_live_followthrough_state},
+                           {t_predicted_move_pips},
+                           {t_after_cost_pips},
+                           {t_predicted_move_bps},
+                           {t_after_cost_bps}
                     FROM vanguard_v5_selection s
                     JOIN vanguard_v5_tradeability t
                       ON t.cycle_ts_utc = s.cycle_ts_utc
@@ -4268,7 +8581,7 @@ class VanguardOrchestrator:
                      AND t.direction = s.direction
                     WHERE s.cycle_ts_utc = ?
                       AND s.profile_id IN (""" + active_profile_placeholders + """)
-                      AND s.asset_class IN ('forex', 'crypto')
+                      AND s.asset_class IN ('forex', 'crypto', 'equity', 'metal', 'index', 'commodity', 'energy')
                     ORDER BY s.asset_class, s.direction, s.selection_rank, s.symbol
                     """,
                     [cycle_ts, *active_profile_ids],
@@ -4303,20 +8616,25 @@ class VanguardOrchestrator:
         except Exception as exc:
             logger.warning("Could not build Telegram shortlist summary: %s", exc)
             return (
-                f"📊 <b>VANGUARD SHORTLIST</b> — {cycle_ts[:16]}\n\n"
+                f"📊 <b>[{self._telegram_env_label()}] VANGUARD SHORTLIST</b> — {cycle_ts[:16]}\n\n"
                 f"{self._build_session_status_block()}\n\n"
                 f"⚠️ Shortlist unavailable this cycle\n"
                 f"Error: <code>{html.escape(str(exc))}</code>"
             )
 
         lines = [
-            f"📊 <b>VANGUARD SHORTLIST</b> — {cycle_ts[:16]}",
+            f"📊 <b>[{self._telegram_env_label()}] VANGUARD SHORTLIST</b> — {cycle_ts[:16]}",
             self._build_session_status_block(),
             "",
         ]
         timeout_policy_header = self._build_timeout_policy_header(cycle_ts)
         if timeout_policy_header:
             lines.append(timeout_policy_header)
+            lines.append("")
+        selection_contract = self._build_selection_contract_summary()
+        if selection_contract:
+            lines.append(selection_contract.get("regime", ""))
+            lines.append(selection_contract.get("eligibility", ""))
             lines.append("")
 
         if not shortlist_rows and not v5_rows:
@@ -4353,12 +8671,17 @@ class VanguardOrchestrator:
             asset_class,
             direction,
             predicted_return,
+            conviction,
             economics_state,
             selection_rank,
+            selection_reason,
             route_tier,
             display_label,
             selection_state,
             direction_streak,
+            top_rank_streak,
+            flip_count_window,
+            live_followthrough_state,
             predicted_move_pips,
             after_cost_pips,
             predicted_move_bps,
@@ -4375,12 +8698,17 @@ class VanguardOrchestrator:
                 "direction": dir_norm,
                 "display_mode": "v5",
                 "predicted_return": predicted_return,
+                "conviction": conviction,
                 "economics_state": economics_state,
                 "rank": selection_rank,
+                "selection_reason": selection_reason,
                 "route_tier": route_tier,
                 "display_label": display_label,
                 "selection_state": selection_state,
                 "direction_streak": direction_streak,
+                "top_rank_streak": top_rank_streak,
+                "flip_count_window": flip_count_window,
+                "live_followthrough_state": live_followthrough_state,
                 "predicted_move_pips": predicted_move_pips,
                 "after_cost_pips": after_cost_pips,
                 "predicted_move_bps": predicted_move_bps,
@@ -4470,8 +8798,7 @@ class VanguardOrchestrator:
             blocked_by_risky: list[dict[str, Any]] = []
             held_by_v6: list[dict[str, Any]] = []
             approved_by_v6: list[dict[str, Any]] = []
-            repeated_thesis: list[dict[str, Any]] = []
-
+            approved_manual_by_v6: list[dict[str, Any]] = []
             for row in v5_display_rows:
                 key = (
                     str(row.get("profile_id") or ""),
@@ -4480,6 +8807,16 @@ class VanguardOrchestrator:
                 )
                 details = portfolio_overlay.get(key)
                 stage_row = dict(row)
+                profile_cfg = next(
+                    (
+                        account
+                        for account in (self._accounts or [])
+                        if str(account.get("id") or "") == str(row.get("profile_id") or "")
+                    ),
+                    {},
+                )
+                profile_mode = self._profile_execution_mode_for_asset(profile_cfg, stage_row.get("asset_class"))
+                stage_row["profile_execution_mode"] = profile_mode
                 if details:
                     stage_row["portfolio"] = details
                 stage_row.update(thesis_state_map.get(key, {}))
@@ -4491,22 +8828,15 @@ class VanguardOrchestrator:
                 if selection_state != "SELECTED":
                     diagnostics_rows.append(stage_row)
                     continue
-                is_repeated_display_thesis = (
-                    str(stage_row.get("thesis_state") or "").startswith("SEEN_RECENTLY")
-                    and not bool(stage_row.get("reentry_blocked"))
-                )
                 if not details:
-                    if is_repeated_display_thesis:
-                        repeated_thesis.append(stage_row)
-                        continue
                     selected_by_v5.append(stage_row)
                     continue
                 status = str(details.get("status") or "").upper()
-                if is_repeated_display_thesis and status != "REJECTED":
-                    repeated_thesis.append(stage_row)
-                    continue
                 if status == "APPROVED":
-                    approved_by_v6.append(stage_row)
+                    if self._is_manual_execution_mode() or profile_mode in {"manual", "off", "paper", "test"}:
+                        approved_manual_by_v6.append(stage_row)
+                    else:
+                        approved_by_v6.append(stage_row)
                 elif status == "HOLD":
                     held_by_v6.append(stage_row)
                 elif status == "REJECTED":
@@ -4517,14 +8847,10 @@ class VanguardOrchestrator:
             actionable_sections.extend(
                 [
                     ("Selected by V5", selected_by_v5, "selected"),
-                    ("Blocked by Risky", blocked_by_risky, "blocked"),
-                    ("Held by V6", held_by_v6, "held"),
-                    (
-                        "Approved / Forward-Tracked" if self._is_manual_execution_mode() else "Approved / Routed",
-                        approved_by_v6,
-                        "approved",
-                    ),
-                    ("Repeated Thesis", repeated_thesis, "approved"),
+                    ("Blocked by Risk", blocked_by_risky, "blocked"),
+                    ("Held at V6", held_by_v6, "held"),
+                    ("Ready This Cycle", approved_manual_by_v6, "approved_manual"),
+                    ("Approved by V6", approved_by_v6, "approved"),
                 ]
             )
 
@@ -4545,8 +8871,46 @@ class VanguardOrchestrator:
                     lines.append("")
             else:
                 lines.append("━━ V5 DIAGNOSTICS ━━")
-                fail_weak_rows = diagnostics_rows[:display_n]
-                for row in fail_weak_rows:
+                lines.append("No ranked V5.2 rows this cycle.")
+                total_candidates = len(v5_display_rows)
+                economics_fail_count = sum(
+                    1 for row in diagnostics_rows
+                    if str(row.get("economics_state") or "").upper() == "FAIL"
+                )
+                economics_pass_count = max(0, total_candidates - economics_fail_count)
+                pocket_reject_count = sum(
+                    1 for row in diagnostics_rows
+                    if str(row.get("selection_reason") or "").upper() == "POCKET_FILTER_REJECT"
+                )
+                pocket_eligible_count = max(0, economics_pass_count - pocket_reject_count)
+                approved_count = sum(
+                    1 for row in portfolio_overlay.values()
+                    if str(row.get("status") or "").upper() == "APPROVED"
+                )
+                lines.append(
+                    "Funnel: "
+                    f"Universe {total_candidates} | "
+                    f"Economics pass {economics_pass_count} | "
+                    f"Pocket-eligible {pocket_eligible_count} | "
+                    f"Approved {approved_count}"
+                )
+                if selection_contract.get("regime") == "Regime: STRICT POCKET":
+                    lines.append("No tradable intent this cycle under the active strict-pocket rules.")
+                reason_counts = Counter(
+                    str(row.get("selection_reason") or row.get("economics_state") or "UNKNOWN").upper()
+                    for row in diagnostics_rows
+                )
+                if reason_counts:
+                    summary_parts = [
+                        f"{reason} {count}"
+                        for reason, count in reason_counts.most_common(4)
+                    ]
+                    lines.append("Top filters: " + " | ".join(summary_parts))
+                diag_candidates = [
+                    row for row in diagnostics_rows
+                    if row.get("rank") not in (None, "") or str(row.get("selection_state") or "").upper() in {"WATCHLIST", "HOLD"}
+                ]
+                for row in diag_candidates[:display_n]:
                     lines.append(
                         self._format_v5_stage_telegram_row(
                             row=row,
@@ -4565,10 +8929,7 @@ class VanguardOrchestrator:
                 approved = sum(1 for row in relevant if str(row.get("status") or "").upper() == "APPROVED")
                 held = sum(1 for row in relevant if str(row.get("status") or "").upper() == "HOLD")
                 blocked = sum(1 for row in relevant if str(row.get("status") or "").upper() == "REJECTED")
-                profile_label = (
-                    str(relevant[0].get("account_id") or "").replace("_demo_", " ").replace("_", " ").upper()
-                    or "ACTIVE"
-                )
+                profile_label = self._profile_display_label(str(relevant[0].get("account_id") or "")) or "ACTIVE"
                 summary = f"🧮 V6 {profile_label}: ✅ {approved} approved"
                 if held:
                     summary += f" | ⏸️ {held} hold"
@@ -4597,10 +8958,9 @@ class VanguardOrchestrator:
                     }
                 )
 
+            visible_assets = set(self._telegram_visible_asset_classes())
             for asset_class in sorted(grouped.keys()):
-                if not self._is_polling_asset_enabled(asset_class):
-                    lines.append(f"━━ {asset_class.upper()} — {self._asset_session_label(asset_class)} ━━")
-                    lines.append("")
+                if asset_class not in visible_assets:
                     continue
                 lines.append(f"━━ {asset_class.upper()} — {self._asset_session_label(asset_class)} ━━")
                 for direction_name, label in (("LONG", "🟢 LONG"), ("SHORT", "🔴 SHORT")):
@@ -4628,79 +8988,606 @@ class VanguardOrchestrator:
 
         return "\n".join(lines).rstrip()
 
-    def _build_session_status_block(self) -> str:
-        """Return a compact session-state header for operator context."""
-        lines = [
-            f"CRYPTO {self._asset_session_label('crypto')}",
-            f"FOREX {self._asset_session_label('forex')}",
-            f"EQUITY {self._asset_session_label('equity')}",
-        ]
-        account_line = self._build_account_snapshot_line()
-        if account_line:
-            lines.append(account_line)
-        return "\n".join(lines)
+    @staticmethod
+    def _directional_conviction_strength(direction: str, conviction: Any) -> float | None:
+        try:
+            value = float(conviction)
+        except (TypeError, ValueError):
+            return None
+        side = str(direction or "").upper()
+        if side == "SHORT":
+            return 1.0 - value
+        return value
 
-    def _build_account_snapshot_line(self) -> str:
+    def _approved_shadow_gate_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cfg = get_shadow_gate_config()
+        if not bool(cfg.get("enabled", True)):
+            return []
+        allowed_assets = {
+            str(asset or "").strip().lower()
+            for asset in (cfg.get("asset_classes") or [])
+            if str(asset or "").strip()
+        }
+        conviction_min = float(cfg.get("conviction_min", 0.60) or 0.60)
+        passed: list[dict[str, Any]] = []
+        for row in rows:
+            asset_class = str(row.get("asset_class") or "").lower()
+            if allowed_assets and asset_class not in allowed_assets:
+                continue
+            strength = self._directional_conviction_strength(row.get("direction") or "", row.get("conviction"))
+            if strength is None or strength < conviction_min:
+                continue
+            candidate = dict(row)
+            candidate["shadow_conviction_strength"] = strength
+            candidate["shadow_conviction_min"] = conviction_min
+            passed.append(candidate)
+        return sorted(
+            passed,
+            key=lambda row: (
+                -float(row.get("shadow_conviction_strength") or 0.0),
+                int(row.get("rank") or 999999),
+                str(row.get("symbol") or ""),
+            ),
+        )
+
+    def _format_shadow_gate_diag(self, row: dict[str, Any]) -> str:
+        asset_class = str(row.get("asset_class") or "").lower()
+        unit = "bps" if asset_class == "crypto" else "p"
+        after_value = row.get("after_cost_bps") if unit == "bps" else row.get("after_cost_pips")
+        after_text = "-" if after_value in (None, "") else f"{float(after_value):.2f}{unit}"
+        conviction_strength = row.get("shadow_conviction_strength")
+        conviction_text = "-"
+        if conviction_strength not in (None, ""):
+            conviction_text = f"{float(conviction_strength):.2f}"
+        flip_text = row.get("flip_count_window")
+        flip_display = "-" if flip_text in (None, "") else str(int(flip_text))
+        top_rank_text = row.get("top_rank_streak")
+        top_rank_display = "-" if top_rank_text in (None, "") else str(int(top_rank_text))
+        followthrough = str(row.get("live_followthrough_state") or "UNKNOWN").upper()
+        return (
+            f"Shadow pass conv*={html.escape(conviction_text)}  "
+            f"after={html.escape(after_text)}  "
+            f"flip={html.escape(flip_display)}  "
+            f"top_rank={html.escape(top_rank_display)}  "
+            f"ft={html.escape(followthrough)}"
+        )
+
+    def _build_shadow_gate_shortlist_telegram(self, cycle_ts: str) -> Optional[str]:
         active_profile_ids = [str(account.get("id") or "") for account in (self._accounts or []) if str(account.get("id") or "").strip()]
         if not active_profile_ids:
+            return None
+        active_profile_placeholders = ",".join("?" for _ in active_profile_ids) or "''"
+        rows: list[dict[str, Any]] = []
+        shortlist_prices: dict[str, float] = {}
+        try:
+            with sqlite_conn(self.db_path) as con:
+                raw_rows = con.execute(
+                    """
+                    SELECT s.profile_id,
+                           s.symbol,
+                           s.asset_class,
+                           s.direction,
+                           t.predicted_return,
+                           t.conviction,
+                           t.economics_state,
+                           s.selection_rank,
+                           s.selection_reason,
+                           s.route_tier,
+                           s.display_label,
+                           s.selection_state,
+                           s.direction_streak,
+                           s.top_rank_streak,
+                           s.flip_count_window,
+                           t.live_followthrough_state,
+                           t.predicted_move_pips,
+                           t.after_cost_pips,
+                           t.predicted_move_bps,
+                           t.after_cost_bps,
+                           p.stop_price,
+                           p.tp_price,
+                           p.shares_or_lots,
+                           p.status,
+                           COALESCE(p.rejection_reason, ''),
+                           p.risk_dollars,
+                           p.risk_pct
+                    FROM vanguard_v5_selection s
+                    JOIN vanguard_v5_tradeability t
+                      ON t.cycle_ts_utc = s.cycle_ts_utc
+                     AND t.profile_id = s.profile_id
+                     AND t.symbol = s.symbol
+                     AND t.direction = s.direction
+                    JOIN vanguard_tradeable_portfolio p
+                      ON p.cycle_ts_utc = s.cycle_ts_utc
+                     AND p.account_id = s.profile_id
+                     AND p.symbol = s.symbol
+                     AND p.direction = s.direction
+                    WHERE s.cycle_ts_utc = ?
+                      AND s.profile_id IN (""" + active_profile_placeholders + """)
+                      AND s.selection_state = 'SELECTED'
+                      AND p.status = 'APPROVED'
+                      AND s.asset_class IN ('forex', 'crypto', 'equity', 'metal', 'index', 'commodity', 'energy')
+                    ORDER BY s.selection_rank, s.symbol
+                    """,
+                    [cycle_ts, *active_profile_ids],
+                ).fetchall()
+                shortlist_prices = self._load_latest_symbol_prices(
+                    con,
+                    symbols=[str(row[1]) for row in raw_rows],
+                    entry_price_cycle_ts=cycle_ts,
+                )
+        except Exception as exc:
+            logger.warning("Could not build shadow-gate shortlist query: %s", exc)
+            return None
+
+        for (
+            profile_id,
+            symbol,
+            asset_class,
+            direction,
+            predicted_return,
+            conviction,
+            economics_state,
+            selection_rank,
+            selection_reason,
+            route_tier,
+            display_label,
+            selection_state,
+            direction_streak,
+            top_rank_streak,
+            flip_count_window,
+            live_followthrough_state,
+            predicted_move_pips,
+            after_cost_pips,
+            predicted_move_bps,
+            after_cost_bps,
+            stop_price,
+            tp_price,
+            shares_or_lots,
+            status,
+            rejection_reason,
+            risk_dollars,
+            risk_pct,
+        ) in raw_rows:
+            rows.append(
+                {
+                    "profile_id": str(profile_id or ""),
+                    "symbol": str(symbol or "").upper(),
+                    "asset_class": str(asset_class or "").lower(),
+                    "direction": str(direction or "").upper(),
+                    "predicted_return": predicted_return,
+                    "conviction": conviction,
+                    "economics_state": economics_state,
+                    "rank": selection_rank,
+                    "selection_reason": selection_reason,
+                    "route_tier": route_tier,
+                    "display_label": display_label,
+                    "selection_state": selection_state,
+                    "direction_streak": direction_streak,
+                    "top_rank_streak": top_rank_streak,
+                    "flip_count_window": flip_count_window,
+                    "live_followthrough_state": live_followthrough_state,
+                    "predicted_move_pips": predicted_move_pips,
+                    "after_cost_pips": after_cost_pips,
+                    "predicted_move_bps": predicted_move_bps,
+                    "after_cost_bps": after_cost_bps,
+                    "session_label": self._session_label_for_cycle_ts(cycle_ts),
+                    "model_horizon_hint": "90–120m",
+                    "exit_by_window": self._format_exit_by_window(cycle_ts),
+                    "timeout_policy": self._timeout_policy_for_cycle_ts(cycle_ts, asset_class or "forex"),
+                    "portfolio": {
+                        "account_id": str(profile_id or ""),
+                        "stop_price": stop_price,
+                        "tp_price": tp_price,
+                        "lot_size": shares_or_lots,
+                        "status": str(status or "").upper(),
+                        "rejection_reason": str(rejection_reason or "").strip(),
+                        "risk_dollars": risk_dollars,
+                        "risk_pct": risk_pct,
+                    },
+                }
+            )
+
+        display_n = int(((self._runtime_config or {}).get("runtime") or {}).get("shortlist_display_top_n") or 10)
+        conviction_min = float(get_shadow_gate_config().get("conviction_min", 0.60) or 0.60)
+        passed_rows = self._approved_shadow_gate_rows(rows)
+        if not rows:
+            return None
+        lines = [
+            f"🎯 <b>[{self._telegram_env_label()}] SHADOW-GATE SHORTLIST</b> — {cycle_ts[:16]}",
+            f"Approved rows that pass observational conviction gate (conv* ≥ {conviction_min:.2f})",
+            self._build_session_status_block(),
+            "",
+        ]
+        if not passed_rows:
+            lines.append("━━ APPROVED + SHADOW PASS ━━")
+            lines.append(f"No approved rows passed conv* ≥ {conviction_min:.2f} this cycle.")
+            lines.append(f"Approved rows checked: {len(rows)}")
+            lines.append("")
+            lines.append("Observational temp filter only. Not an active routing policy.")
+            return "\n".join(lines).rstrip()
+
+        lines.append("━━ APPROVED + SHADOW PASS ━━")
+        for row in passed_rows[:display_n]:
+            lines.append(
+                self._format_v5_stage_telegram_row(
+                    row=row,
+                    price=shortlist_prices.get(str(row.get("symbol") or "").upper()),
+                    stage="approved_manual",
+                )
+            )
+            lines.append(self._format_shadow_gate_diag(row))
+        lines.append("")
+        lines.append("Observational temp filter only. Not an active routing policy.")
+        return "\n".join(lines).rstrip()
+
+    def _build_session_status_block(
+        self,
+        *,
+        asset_class: str | None = None,
+        profile_id: str | None = None,
+        profile_ids: list[str] | None = None,
+    ) -> str:
+        """Return a compact session-state header for operator context."""
+        visible_assets = self._telegram_visible_asset_classes()
+        lines = [f"{asset.upper()} {self._asset_session_label(asset)}" for asset in visible_assets]
+        primary_asset = str((asset_class or (visible_assets[0] if visible_assets else "forex")) or "forex").lower()
+        requested_ids: list[str] = []
+        if profile_ids:
+            requested_ids.extend(str(pid or "").strip() for pid in profile_ids if str(pid or "").strip())
+        elif profile_id:
+            requested_ids.append(str(profile_id or "").strip())
+
+        if requested_ids:
+            seen_profile_ids: set[str] = set()
+            for requested_profile_id in requested_ids:
+                if requested_profile_id in seen_profile_ids:
+                    continue
+                seen_profile_ids.add(requested_profile_id)
+                account_line = self._build_account_snapshot_line(
+                    profile_id=requested_profile_id,
+                    asset_class=primary_asset,
+                )
+                if account_line:
+                    lines.append(account_line)
+        else:
+            account_line = self._build_account_snapshot_line(profile_id=profile_id, asset_class=primary_asset)
+            if account_line:
+                lines.append(account_line)
+        routing_pause = self._active_routing_pause_note()
+        if routing_pause:
+            lines.append(f"Entry Pause: {routing_pause}")
+        return "\n".join(lines)
+
+    def _telegram_visible_asset_classes(self) -> list[str]:
+        """Active asset lanes worth showing in operator Telegram surfaces."""
+        standard_order = ("crypto", "forex", "equity", "metal", "index", "commodity", "energy")
+        if self._force_assets:
+            return [asset for asset in standard_order if asset in self._force_assets]
+        visible: list[str] = []
+        for asset in standard_order:
+            if any(self._get_runtime_universe_symbols(str(account.get("id") or ""), asset) for account in (self._accounts or [])):
+                visible.append(asset)
+        return visible or ["forex"]
+
+    def _telegram_env_label(self) -> str:
+        envs = []
+        for account in self._accounts or []:
+            env = str(account.get("environment") or "").strip().upper()
+            if env and env not in envs:
+                envs.append(env)
+        if envs:
+            return "/".join(envs)
+        db_lower = str(self.db_path or "").lower()
+        if "qaenv" in db_lower:
+            return "QA"
+        return "PROD"
+
+    def _profile_display_label(self, profile_id: str) -> str:
+        for account in self._accounts or []:
+            if str(account.get("id") or "") == str(profile_id or ""):
+                return str(account.get("name") or account.get("id") or profile_id)
+        return str(profile_id or "").replace("_demo_", " ").replace("_", " ").upper()
+
+    def _runtime_profile_by_id(self, profile_id: str) -> dict[str, Any]:
+        wanted = str(profile_id or "").strip()
+        if not wanted:
+            return {}
+        cfg = self._runtime_config or get_runtime_config()
+        for profile in cfg.get("profiles") or []:
+            if str((profile or {}).get("id") or "").strip() == wanted:
+                return dict(profile or {})
+        return {}
+
+    def _resolve_active_telegram_binding(
+        self,
+        asset_class: str,
+        *,
+        preferred_profile_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        cfg = self._runtime_config or get_runtime_config()
+        asset = str(asset_class or "forex").strip().lower() or "forex"
+
+        preferred_ids: list[str] = []
+        if preferred_profile_id:
+            preferred_ids.append(str(preferred_profile_id))
+        preferred_ids.extend(
+            str(account.get("id") or "")
+            for account in (self._accounts or [])
+            if str(account.get("id") or "").strip()
+        )
+
+        seen: set[str] = set()
+        ordered_ids: list[str] = []
+        for profile_id in preferred_ids:
+            pid = str(profile_id or "").strip()
+            if pid and pid not in seen:
+                ordered_ids.append(pid)
+                seen.add(pid)
+
+        active: list[tuple[str, dict[str, Any]]] = []
+        for profile_id in ordered_ids:
+            profile_cfg = self._runtime_profile_by_id(profile_id)
+            if not profile_cfg:
+                continue
+            try:
+                binding = resolve_profile_lane_binding(
+                    profile_cfg,
+                    asset,
+                    runtime_cfg=cfg,
+                    strict=False,
+                    allow_legacy=binding_allows_legacy(profile_cfg, asset, runtime_cfg=cfg),
+                )
+            except Exception:
+                continue
+            if not bool(binding.get("enabled", False)):
+                continue
+            if str(binding.get("execution_mode") or "").strip().lower() != "auto":
+                continue
+            if not str(binding.get("execution_bridge") or "").strip():
+                continue
+            if not str(binding.get("context_source_id") or "").strip():
+                continue
+            active.append((profile_id, dict(binding or {})))
+
+        if active:
+            return active[0]
+        if ordered_ids:
+            return ordered_ids[0], {}
+        return None, {}
+
+    def _active_telegram_profile_ids(self, asset_class: str) -> list[str]:
+        cfg = self._runtime_config or get_runtime_config()
+        asset = str(asset_class or "forex").strip().lower() or "forex"
+        active_ids: list[str] = []
+        for account in self._accounts or []:
+            profile_id = str(account.get("id") or "").strip()
+            if not profile_id:
+                continue
+            profile_cfg = self._runtime_profile_by_id(profile_id)
+            if not profile_cfg:
+                active_ids.append(profile_id)
+                continue
+            try:
+                binding = resolve_profile_lane_binding(
+                    profile_cfg,
+                    asset,
+                    runtime_cfg=cfg,
+                    strict=False,
+                    allow_legacy=binding_allows_legacy(profile_cfg, asset, runtime_cfg=cfg),
+                )
+            except Exception:
+                continue
+            if not bool(binding.get("enabled", False)):
+                continue
+            if str(binding.get("execution_mode") or "").strip().lower() == "auto":
+                active_ids.append(profile_id)
+        return active_ids
+
+    def _active_telegram_bindings(self, asset_class: str) -> list[tuple[str, dict[str, Any]]]:
+        cfg = self._runtime_config or get_runtime_config()
+        asset = str(asset_class or "forex").strip().lower() or "forex"
+        active_bindings: list[tuple[str, dict[str, Any]]] = []
+        for profile_id in self._active_telegram_profile_ids(asset):
+            profile_cfg = self._runtime_profile_by_id(profile_id)
+            if not profile_cfg:
+                continue
+            try:
+                binding = resolve_profile_lane_binding(
+                    profile_cfg,
+                    asset,
+                    runtime_cfg=cfg,
+                    strict=False,
+                    allow_legacy=binding_allows_legacy(profile_cfg, asset, runtime_cfg=cfg),
+                )
+            except Exception:
+                continue
+            if not bool(binding.get("enabled", False)):
+                continue
+            if str(binding.get("execution_mode") or "").strip().lower() != "auto":
+                continue
+            active_bindings.append((profile_id, dict(binding or {})))
+        return active_bindings
+
+    def _context_snapshot_max_age_seconds(self, asset_class: str) -> int:
+        cfg = self._runtime_config or get_runtime_config()
+        asset = str(asset_class or "forex").strip().lower() or "forex"
+        v2_cfg = (cfg.get("v2_prefilter") or {})
+        defaults = dict(v2_cfg.get("defaults") or {})
+        asset_thresholds = ((v2_cfg.get("asset_thresholds") or {}).get(asset) or {})
+        max_stale_minutes = asset_thresholds.get("max_stale_minutes", defaults.get("max_stale_minutes", 5.0))
+        try:
+            return max(int(float(max_stale_minutes) * 60), 60)
+        except Exception:
+            return 300
+
+    def _snapshot_is_fresh(
+        self,
+        ts_raw: Any,
+        *,
+        asset_class: str,
+    ) -> bool:
+        if not ts_raw:
+            return False
+        try:
+            age_seconds = (self._now_utc() - parse_utc(str(ts_raw))).total_seconds()
+        except Exception:
+            return False
+        return age_seconds <= float(self._context_snapshot_max_age_seconds(asset_class))
+
+    @staticmethod
+    def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
+        try:
+            return {str(row[1]) for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        except Exception:
+            return set()
+
+    @staticmethod
+    def _optional_col_expr(
+        available_cols: set[str],
+        alias: str,
+        column: str,
+        *,
+        fallback_sql: str = "NULL",
+        out_alias: str | None = None,
+    ) -> str:
+        expr = f"{alias}.{column}" if column in available_cols else fallback_sql
+        if out_alias:
+            return f"{expr} AS {out_alias}"
+        return expr
+
+    def _build_account_snapshot_line(
+        self,
+        *,
+        profile_id: str | None = None,
+        asset_class: str | None = None,
+    ) -> str:
+        asset = str(asset_class or "forex").strip().lower() or "forex"
+        resolved_profile_id, _binding = self._resolve_active_telegram_binding(
+            asset,
+            preferred_profile_id=profile_id,
+        )
+        if not resolved_profile_id:
             return ""
-        profile_id = active_profile_ids[0]
+        profile_id = resolved_profile_id
         try:
             with sqlite_conn(self.db_path) as con:
                 con.row_factory = sqlite3.Row
-                account = con.execute(
-                    """
-                    SELECT profile_id, balance, equity, free_margin, received_ts_utc
-                    FROM vanguard_context_account_latest
-                    WHERE profile_id = ?
-                    ORDER BY received_ts_utc DESC
-                    LIMIT 1
-                    """,
-                    (profile_id,),
-                ).fetchone()
+                account_cols = self._table_columns(con, "vanguard_context_account_latest")
+                pos_cols = self._table_columns(con, "vanguard_context_positions_latest")
+                floating_pnl_expr = "floating_pnl" if "floating_pnl" in pos_cols else "0"
+                ticket_expr = "ticket" if "ticket" in pos_cols else "rowid"
+                ts_expr = "received_ts_utc" if "received_ts_utc" in pos_cols else "NULL"
+                account = fetch_latest_context_account_row(
+                    con,
+                    profile_id=profile_id,
+                    runtime_cfg=get_runtime_config(),
+                    require_ok="source_status" in account_cols,
+                )
+                if not account:
+                    account = con.execute(
+                        """
+                        SELECT profile_id, balance, equity, free_margin, received_ts_utc
+                        FROM vanguard_context_account_latest
+                        WHERE profile_id = ?
+                        ORDER BY COALESCE(received_ts_utc, '') DESC
+                        LIMIT 1
+                        """,
+                        (profile_id,),
+                    ).fetchone()
                 pos = con.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) AS open_positions,
                            COALESCE(SUM(COALESCE(floating_pnl, 0)), 0) AS unrealized_pnl,
                            MAX(received_ts_utc) AS positions_ts_utc
                     FROM (
-                        SELECT ticket,
-                               floating_pnl,
-                               received_ts_utc,
+                        SELECT {ticket_expr} AS ticket,
+                               {floating_pnl_expr} AS floating_pnl,
+                               {ts_expr} AS received_ts_utc,
                                ROW_NUMBER() OVER (
                                    PARTITION BY ticket
                                    ORDER BY received_ts_utc DESC
                                ) AS rn
                         FROM vanguard_context_positions_latest
                         WHERE profile_id = ?
+                          AND source_status = 'OK'
                     )
                     WHERE rn = 1
                     """,
                     (profile_id,),
                 ).fetchone()
+                state = None
+                if "vanguard_account_state" in {
+                    str(row[0])
+                    for row in con.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }:
+                    state = con.execute(
+                        """
+                        SELECT equity, updated_at_utc, open_positions_json
+                        FROM vanguard_account_state
+                        WHERE profile_id = ?
+                        LIMIT 1
+                        """,
+                        (profile_id,),
+                    ).fetchone()
         except Exception as exc:
             logger.warning("Could not build account snapshot line: %s", exc)
             return ""
-        if not account:
-            return ""
-        balance = float(account["balance"] or 0.0)
-        equity = float(account["equity"] or 0.0)
-        free_margin = float(account["free_margin"] or 0.0)
-        open_positions = int((pos["open_positions"] if pos else 0) or 0)
-        unrealized_pnl = float((pos["unrealized_pnl"] if pos else 0.0) or 0.0)
-        ts_raw = (pos["positions_ts_utc"] if pos and pos["positions_ts_utc"] else account["received_ts_utc"])
-        ts_text = "-"
-        if ts_raw:
-            try:
-                ts_text = utc_to_et(parse_utc(str(ts_raw))).strftime("%H:%M:%S ET")
-            except Exception:
-                ts_text = str(ts_raw)
-        profile_label = profile_id.replace("_demo_", " ").replace("_", " ").upper()
-        return (
-            f"ACCOUNT {profile_label} {ts_text}  "
-            f"Bal {balance:.2f}  Eq {equity:.2f}  FM {free_margin:.2f}  "
-            f"Pos {open_positions}  UPL {unrealized_pnl:+.2f}"
+        profile_label = self._profile_display_label(profile_id)
+        account_fresh = bool(account) and self._snapshot_is_fresh(account["received_ts_utc"], asset_class=asset)
+        positions_fresh = bool(pos) and self._snapshot_is_fresh(
+            pos["positions_ts_utc"] if pos else None,
+            asset_class=asset,
         )
+
+        def _fmt_ts(ts_raw: Any) -> str:
+            if not ts_raw:
+                return "-"
+            try:
+                return utc_to_et(parse_utc(str(ts_raw))).strftime("%H:%M:%S ET")
+            except Exception:
+                return str(ts_raw)
+
+        if account_fresh and positions_fresh:
+            balance = float(account["balance"] or 0.0)
+            equity = float(account["equity"] or 0.0)
+            free_margin = float(account["free_margin"] or 0.0)
+            open_positions = int((pos["open_positions"] if pos else 0) or 0)
+            unrealized_pnl = float((pos["unrealized_pnl"] if pos else 0.0) or 0.0)
+            ts_raw = (pos["positions_ts_utc"] if pos and pos["positions_ts_utc"] else account["received_ts_utc"])
+            cached_fallback = False
+            try:
+                raw_payload = json.loads(account["raw_payload_json"] or "{}")
+                cached_fallback = bool(raw_payload.get("cached_fallback"))
+            except Exception:
+                cached_fallback = False
+            if cached_fallback:
+                equity_est = balance + unrealized_pnl
+                return (
+                    f"ACCOUNT {profile_label} {_fmt_ts(ts_raw)}  "
+                    f"Bal {balance:.2f}  Eq~ {equity_est:.2f}  "
+                    f"Pos {open_positions}  UPL {unrealized_pnl:+.2f}  acct=cached"
+                )
+            return (
+                f"ACCOUNT {profile_label} {_fmt_ts(ts_raw)}  "
+                f"Bal {balance:.2f}  Eq {equity:.2f}  FM {free_margin:.2f}  "
+                f"Pos {open_positions}  UPL {unrealized_pnl:+.2f}"
+            )
+
+        if state and self._snapshot_is_fresh(state["updated_at_utc"], asset_class=asset):
+            try:
+                open_positions_json = json.loads(state["open_positions_json"] or "[]")
+            except Exception:
+                open_positions_json = []
+            open_positions = len(open_positions_json) if isinstance(open_positions_json, list) else 0
+            equity = float(state["equity"] or 0.0)
+            return (
+                f"ACCOUNT {profile_label} {_fmt_ts(state['updated_at_utc'])}  "
+                f"Eq {equity:.2f}  Pos {open_positions}  UPL n/a"
+            )
+
+        return f"ACCOUNT {profile_label} context stale"
 
     def _build_operator_diagnostics_telegram(self, cycle_ts: str) -> Optional[str]:
         tg_cfg = ((self._runtime_config or {}).get("telegram") or {}).get("diagnostics") or {}
@@ -4780,7 +9667,7 @@ class VanguardOrchestrator:
                 # Selected but never materialized into V6 rows yet.
                 v6_held.append((row, {"status": "HOLD", "rejection_reason": "NO_V6_ROW"}))
 
-        lines = [f"🧭 <b>VANGUARD DIAGNOSTICS</b> — {html.escape(cycle_ts[:16])}"]
+        lines = [f"🧭 <b>[{self._telegram_env_label()}] VANGUARD DIAGNOSTICS</b> — {html.escape(cycle_ts[:16])}"]
         account_line = self._build_account_snapshot_line()
         if account_line:
             lines.append(account_line)
@@ -4813,7 +9700,11 @@ class VanguardOrchestrator:
         if include_v2_health and health_rows:
             lines.append("━━ V2 HEALTH ━━")
             grouped: dict[str, list[str]] = defaultdict(list)
+            visible_assets = set(self._telegram_visible_asset_classes())
             for row in health_rows:
+                asset_class = str(row.get("asset_class") or "unknown").lower()
+                if asset_class not in visible_assets:
+                    continue
                 grouped[str(row.get("asset_class") or "unknown").lower()].append(
                     f"{str(row.get('status') or 'UNKNOWN').upper()} {int(row.get('row_count') or 0)}"
                 )
@@ -4842,6 +9733,7 @@ class VanguardOrchestrator:
         diag_cfg = (((self._runtime_config or {}).get("runtime") or {}).get("context_state_diagnostics") or {})
         forex_fresh = int(diag_cfg.get("forex_fresh_seconds") or 180)
         crypto_fresh = int(diag_cfg.get("crypto_fresh_seconds") or 120)
+        equity_fresh = int(diag_cfg.get("equity_fresh_seconds") or 180)
         lines: list[str] = []
         active_profile_ids = [str(account.get("id") or "") for account in (self._accounts or []) if str(account.get("id") or "").strip()]
         if not active_profile_ids:
@@ -4850,11 +9742,30 @@ class VanguardOrchestrator:
             with sqlite_conn(self.db_path) as con:
                 con.row_factory = sqlite3.Row
                 for profile_id in active_profile_ids:
-                    for asset_class in ("forex", "crypto"):
+                    visible_assets = set(self._telegram_visible_asset_classes())
+                    for asset_class in ("forex", "crypto", "equity", "metal", "index", "commodity", "energy"):
+                        if asset_class not in visible_assets:
+                            continue
                         symbols = self._get_runtime_universe_symbols(profile_id, asset_class)
-                        fresh_seconds = forex_fresh if asset_class == "forex" else crypto_fresh
+                        if not symbols:
+                            # Skip asset classes this profile doesn't carry — avoids
+                            # printing empty METAL/INDEX rows for equity-only profiles.
+                            continue
+                        fresh_seconds = (
+                            forex_fresh if asset_class == "forex"
+                            else crypto_fresh if asset_class == "crypto"
+                            else equity_fresh
+                        )
                         quote_table = "vanguard_context_quote_latest"
-                        state_table = "vanguard_forex_pair_state" if asset_class == "forex" else "vanguard_crypto_symbol_state"
+                        state_table = (
+                            "vanguard_forex_pair_state"
+                            if asset_class == "forex"
+                            else "vanguard_crypto_symbol_state"
+                            if asset_class == "crypto"
+                            else "vanguard_metal_symbol_state"
+                            if asset_class == "metal"
+                            else "vanguard_equity_symbol_state"
+                        )
                         expected = len(symbols)
                         fresh = stale = missing = 0
                         latest_quote_ts = None
@@ -4862,7 +9773,8 @@ class VanguardOrchestrator:
                             placeholders = ",".join("?" for _ in symbols)
                             rows = con.execute(
                                 f"""
-                                SELECT symbol, quote_ts_utc
+                                SELECT symbol,
+                                       COALESCE(received_ts_utc, quote_ts_utc) AS effective_quote_ts_utc
                                 FROM {quote_table}
                                 WHERE profile_id = ?
                                   AND symbol IN ({placeholders})
@@ -4874,7 +9786,11 @@ class VanguardOrchestrator:
                             for row in rows:
                                 symbol = str(row["symbol"]).upper()
                                 seen.add(symbol)
-                                ts = parse_utc(str(row["quote_ts_utc"])) if row["quote_ts_utc"] else None
+                                ts = (
+                                    parse_utc(str(row["effective_quote_ts_utc"]))
+                                    if row["effective_quote_ts_utc"]
+                                    else None
+                                )
                                 if ts and (latest_quote_ts is None or ts > latest_quote_ts):
                                     latest_quote_ts = ts
                                 age = None if ts is None else max(0, int((now_dt - ts).total_seconds()))
@@ -5371,6 +10287,7 @@ class VanguardOrchestrator:
         rank = row.get("rank")
         rank_text = f"Selection Rank {int(rank)}" if rank not in (None, "") else "Selection Rank -"
         economics_text = str(row.get("economics_state") or "UNKNOWN").upper()
+        selection_reason = str(row.get("selection_reason") or economics_text).upper()
         details = row.get("portfolio") or {}
         status = str(details.get("status") or "").upper()
         reason = self._format_telegram_reason(str(details.get("rejection_reason") or ""))
@@ -5380,6 +10297,9 @@ class VanguardOrchestrator:
         tp = details.get("tp_price")
         qty = details.get("lot_size")
         thesis_state = str(row.get("thesis_state") or "NEW").upper()
+        thesis_display = thesis_state
+        if thesis_state.startswith("SEEN_RECENTLY"):
+            thesis_display = thesis_state.replace("SEEN_RECENTLY", "REPEAT")
         session_label = str(row.get("session_label") or "Unknown")
         model_horizon_hint = str(row.get("model_horizon_hint") or "90–120m")
         exit_by_window = str(row.get("exit_by_window") or "-")
@@ -5396,16 +10316,17 @@ class VanguardOrchestrator:
         move_line = f"Move {html.escape(move_text)}  After {html.escape(after_text)}"
 
         if stage == "diagnostic":
-            return f"{header}\nV5 {html.escape(economics_text)}  {html.escape(rank_text)}\n{move_line}"
+            detail_text = rank_text if rank not in (None, "") else f"Reason {selection_reason}"
+            return f"{header}\nV5 {html.escape(economics_text)}  {html.escape(detail_text)}\n{move_line}"
 
         if stage == "selected":
             return (
                 f"{header}\n"
                 f"V5 SELECTED  {html.escape(rank_text)}\n"
                 f"{move_line}\n"
-                f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_state)}  Model Horizon {html.escape(model_horizon_hint)}\n"
+                f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_display)}  Model Horizon {html.escape(model_horizon_hint)}\n"
                 f"Exit by {html.escape(exit_by_window)}\n"
-                f"Timeout Guide {html.escape(timeout_guide)}"
+                f"Time Exit {html.escape(timeout_guide)}"
             )
 
         if stage == "blocked":
@@ -5414,10 +10335,10 @@ class VanguardOrchestrator:
                 f"{header}\n"
                 f"V5 SELECTED  {html.escape(rank_text)}\n"
                 f"{move_line}\n"
-                f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_state)}  Model Horizon {html.escape(model_horizon_hint)}\n"
+                f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_display)}  Model Horizon {html.escape(model_horizon_hint)}\n"
                 f"Exit by {html.escape(exit_by_window)}\n"
-                f"Timeout Guide {html.escape(timeout_guide)}\n"
-                f"Risk {html.escape(reason or status or 'BLOCKED')}{html.escape(blocked_note)}"
+                f"Time Exit {html.escape(timeout_guide)}\n"
+                f"Decision {html.escape(reason or status or 'BLOCKED')}{html.escape(blocked_note)}"
             )
 
         risk_text = "-"
@@ -5428,15 +10349,20 @@ class VanguardOrchestrator:
         sl_text = "-" if sl in (None, "") else f"{float(sl):.5f}".rstrip("0").rstrip(".")
         tp_text = "-" if tp in (None, "") else f"{float(tp):.5f}".rstrip("0").rstrip(".")
         qty_text = "-" if qty in (None, "") else f"{float(qty):.6f}".rstrip("0").rstrip(".")
-        stage_label = "V6 HOLD" if stage == "held" else "APPROVED"
+        if stage == "held":
+            stage_label = "V6 HOLD"
+        elif stage == "approved_manual":
+            stage_label = "FORWARD TRACK"
+        else:
+            stage_label = "APPROVED CANDIDATE"
         stage_reason = f" {reason}" if reason else ""
         return (
             f"{header}\n"
             f"V5 SELECTED  {html.escape(rank_text)}\n"
             f"{move_line}\n"
-            f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_state)}  Model Horizon {html.escape(model_horizon_hint)}\n"
+            f"Session {html.escape(session_label)}  Thesis {html.escape(thesis_display)}  Model Horizon {html.escape(model_horizon_hint)}\n"
             f"Exit by {html.escape(exit_by_window)}\n"
-            f"Timeout Guide {html.escape(timeout_guide)}\n"
+            f"Time Exit {html.escape(timeout_guide)}\n"
             f"{html.escape(stage_label + stage_reason)}  Risk {html.escape(risk_text)}\n"
             f"SL {html.escape(sl_text)}  TP {html.escape(tp_text)}  Qty {html.escape(qty_text)}"
         )
@@ -5550,6 +10476,9 @@ class VanguardOrchestrator:
             lot_text = f"{float(lot_size):.2f}"
         streak_text = streak_counter or "F ⚪⚪⚪⚪⚪"
         side_emoji = "🟢" if str(direction or "").upper() == "LONG" else "🔴"
+        timeout_minutes = details.get("timeout_minutes")
+        timeout_label = details.get("timeout_label")
+        dedupe_minutes = details.get("dedupe_minutes")
         timeout_note = ""
         if timeout_minutes not in (None, "") and dedupe_minutes not in (None, ""):
             timeout_note = (
@@ -5582,7 +10511,7 @@ class VanguardOrchestrator:
                 symbols.add(self._normalize_gft_display_symbol(symbol))
         if symbols:
             return symbols
-        return {"BNBUSD", "BTCUSD", "ETHUSD", "LTCUSD", "SOLUSD", "BCHUSD"}
+        return {"BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "BCHUSD", "SOLUSD", "BNBUSD", "ADAUSD", "DOTUSD", "AVAXUSD"}
 
     def _format_shortlist_telegram_item(
         self,
@@ -5804,16 +10733,17 @@ class VanguardOrchestrator:
             return 10.0
         return 1.0
 
-    def _send_telegram(self, message: str) -> None:
+    def _send_telegram(self, message: str, *, message_type: str | None = None) -> None:
         if not self._telegram or not message:
             logger.debug("[TELEGRAM] Skipped: telegram=%s message_len=%d",
                          bool(self._telegram), len(message or ""))
             return
         chunks = self._chunk_telegram_message(message)
+        self._record_cycle_trace_telegram(message, message_type, len(chunks))
         logger.info("[TELEGRAM] Sending %d chunk(s), total %d chars", len(chunks), len(message))
         for i, chunk in enumerate(chunks):
             try:
-                self._telegram.send(chunk)
+                self._telegram.send(chunk, message_type=message_type)
                 logger.info("[TELEGRAM] Chunk %d/%d sent OK", i + 1, len(chunks))
             except Exception as exc:
                 logger.warning("[TELEGRAM] Chunk %d/%d FAILED: %s", i + 1, len(chunks), exc)
@@ -5893,6 +10823,7 @@ def _parse_args() -> argparse.Namespace:
     runtime_cfg = get_runtime_config().get("runtime") or {}
     default_mode = _normalize_execution_mode(runtime_cfg.get("execution_mode", "manual"))
     default_interval = int(runtime_cfg.get("cycle_interval_seconds", CYCLE_MINUTES * 60))
+    default_offset = int(runtime_cfg.get("cycle_offset_seconds", 0))
     default_force_assets = ",".join(runtime_cfg.get("force_assets") or [])
     p = argparse.ArgumentParser(
         description="Vanguard V7 Orchestrator — session lifecycle loop",
@@ -5900,7 +10831,7 @@ def _parse_args() -> argparse.Namespace:
         epilog=(
             "Examples:\n"
             "  python3 stages/vanguard_orchestrator.py --single-cycle --dry-run\n"
-            "  python3 stages/vanguard_orchestrator.py --loop --interval 300\n"
+            "  python3 stages/vanguard_orchestrator.py --loop --interval 300 --dry-run\n"
             "  python3 stages/vanguard_orchestrator.py --execution-mode manual\n"
             "  python3 stages/vanguard_orchestrator.py --execution-mode test --single-cycle\n"
             "  python3 stages/vanguard_orchestrator.py --status\n"
@@ -5915,7 +10846,7 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--dry-run", action="store_true",
-        help="Run pipeline in dry-run mode (no DB writes)",
+        help="No-persist validation mode. Overrides execution mode to internal test mode for both single-cycle and loop runs.",
     )
     p.add_argument(
         "--single-cycle", action="store_true",
@@ -5928,6 +10859,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--interval", type=int, default=default_interval,
         help=f"Cycle interval in seconds for loop mode (default: {default_interval})",
+    )
+    p.add_argument(
+        "--cycle-offset-seconds", type=int, default=default_offset,
+        help=f"Deterministic offset from the 5-minute boundary in seconds (default: {default_offset})",
     )
     p.add_argument(
         "--status", action="store_true",
@@ -6012,6 +10947,7 @@ def main() -> None:
         equity_data_source=args.equity_data_source,
         force_assets=args.force_assets,
         cycle_interval_seconds=args.interval,
+        cycle_offset_seconds=args.cycle_offset_seconds,
         force_cycle_ts=args.force_cycle_ts,
         no_telegram=args.no_telegram,
     )
